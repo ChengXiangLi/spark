@@ -114,7 +114,7 @@ private[spark] class ShuffleMapTask(
 
   val shuffleClients: HashMap[String, ShuffleOutputClient] = new HashMap[String, ShuffleOutputClient]
 
-  protected def this() = this(0, null, null, 0, null)
+  protected def this() = this(0, null, null, 0, null, null)
 
   @transient private val preferredLocs: Seq[TaskLocation] = {
     if (locs == null) Nil else locs.toSet.toSeq

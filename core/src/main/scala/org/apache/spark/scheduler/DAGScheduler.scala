@@ -1174,7 +1174,7 @@ class DAGScheduler(
     val jobContext = taskScheduler.getJobContext(jobId)
     val stageContext = jobContext.stageContexts(stageId)
     val host = stageContext(partition)
-    Seq(new TaskLocation(host))
+    Seq(TaskLocation(host))
   }
 
   def stop() {
