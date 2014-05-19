@@ -33,6 +33,7 @@ import org.apache.spark.partial.{ApproximateActionListener, ApproximateEvaluator
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.{BlockId, BlockManager, BlockManagerMaster, RDDBlockId}
 import org.apache.spark.util.Utils
+import scala.collection.mutable
 
 /**
  * The high-level scheduling layer that implements stage-oriented scheduling. It computes a DAG of
@@ -740,6 +741,7 @@ class DAGScheduler(
         logDebug("missing: " + missing)
         if (missing == Nil) {
           logInfo("Submitting " + stage + " (" + stage.rdd + "), which has no missing parents")
+          addStageContext(jobId.get, stage)
           submitMissingTasks(stage, jobId.get)
           runningStages += stage
         } else {
@@ -754,6 +756,10 @@ class DAGScheduler(
     }
   }
 
+  private def addStageContext(jobId: Int, stage: Stage) {
+    taskScheduler.addStageContext(jobId, stage)
+  }
+
 
   /** Called when stage's parents are available and we can now do its task. */
   private def submitMissingTasks(stage: Stage, jobId: Int) {
@@ -764,7 +770,11 @@ class DAGScheduler(
     var tasks = ArrayBuffer[Task[_]]()
     if (stage.isShuffleMap) {
       for (p <- 0 until stage.numPartitions if stage.outputLocs(p) == Nil) {
-        val locs = getPreferredLocs(stage.rdd, p)
+        var locs:Seq[TaskLocation] = null
+        if (stage.parents == null) {
+          locs = getPreferredLocs(stage.rdd, p)
+        } else
+          locs = getPreferredLocs(p, jobId, stage.id)
         tasks += new ShuffleMapTask(stage.id, stage.rdd, stage.shuffleDep.get, p, locs)
       }
     } else {
@@ -772,7 +782,11 @@ class DAGScheduler(
       val job = resultStageToJob(stage)
       for (id <- 0 until job.numPartitions if !job.finished(id)) {
         val partition = job.partitions(id)
-        val locs = getPreferredLocs(stage.rdd, partition)
+        var locs:Seq[TaskLocation] = null
+        if (stage.parents == null) {
+          locs = getPreferredLocs(stage.rdd, partition)
+        } else
+          locs = getPreferredLocs(partition, jobId, stage.id)
         tasks += new ResultTask(stage.id, stage.rdd, job.func, partition, locs, id)
       }
     }
@@ -1153,6 +1167,14 @@ class DAGScheduler(
       case _ =>
     }
     Nil
+  }
+
+  private[spark]
+  def getPreferredLocs(partition: Int, jobId: Int, stageId: Int): Seq[TaskLocation] = synchronized {
+    val jobContext = taskScheduler.getJobContext(jobId)
+    val stageContext = jobContext.stageContexts(stageId)
+    val host = stageContext(partition)
+    Seq(new TaskLocation(host))
   }
 
   def stop() {

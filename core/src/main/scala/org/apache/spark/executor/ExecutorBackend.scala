@@ -20,10 +20,13 @@ package org.apache.spark.executor
 import java.nio.ByteBuffer
 
 import org.apache.spark.TaskState.TaskState
+import scala.collection.mutable
 
 /**
  * A pluggable interface used by the Executor to send updates to the cluster scheduler.
  */
 private[spark] trait ExecutorBackend {
   def statusUpdate(taskId: Long, state: TaskState, data: ByteBuffer)
+
+  def getStageContext(taskId: Long): mutable.HashMap[Int, String]
 }

@@ -22,6 +22,7 @@ import java.nio.ByteBuffer
 import org.apache.spark.TaskState.TaskState
 import org.apache.spark.scheduler.TaskDescription
 import org.apache.spark.util.{SerializableBuffer, Utils}
+import scala.collection.mutable
 
 private[spark] sealed trait CoarseGrainedClusterMessage extends Serializable
 
@@ -37,6 +38,10 @@ private[spark] object CoarseGrainedClusterMessages {
     extends CoarseGrainedClusterMessage
 
   case class RegisterExecutorFailed(message: String) extends CoarseGrainedClusterMessage
+
+  case class AddStageContext(jobId: Int, stage: org.apache.spark.scheduler.Stage) extends CoarseGrainedClusterMessage
+
+  case class GetStageContext(executorId: String, taskId: Long) extends CoarseGrainedClusterMessage
 
   // Executors to driver
   case class RegisterExecutor(executorId: String, hostPort: String, cores: Int)

@@ -249,6 +249,9 @@ private[spark] class Executor(
 
         execBackend.statusUpdate(taskId, TaskState.FINISHED, serializedResult)
         logInfo("Finished task ID " + taskId)
+        task.pushData(execBackend.getStageContext(taskId))
+        execBackend.statusUpdate(taskId, TaskState.PUSHED, serializedResult)
+        logInfo("Task[" + taskId + "] outputs have been pushed to reduce side.")
       } catch {
         case ffe: FetchFailedException => {
           val reason = ffe.toTaskEndReason

@@ -190,4 +190,8 @@ private[spark] class DiskBlockObjectWriter(
   override def bytesWritten: Long = {
     lastValidPosition - initialPosition
   }
+
+  def getFile: File = {
+    file
+  }
 }

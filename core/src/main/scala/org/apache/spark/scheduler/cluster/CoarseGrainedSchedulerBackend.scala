@@ -28,9 +28,20 @@ import akka.pattern.ask
 import akka.remote.{DisassociatedEvent, RemotingLifecycleEvent}
 
 import org.apache.spark.{Logging, SparkException, TaskState}
-import org.apache.spark.scheduler.{SchedulerBackend, SlaveLost, TaskDescription, TaskSchedulerImpl, WorkerOffer}
+import org.apache.spark.scheduler.{JobContext, SchedulerBackend, SlaveLost, TaskDescription, TaskSchedulerImpl, WorkerOffer}
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
 import org.apache.spark.util.{AkkaUtils, Utils}
+import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.RegisteredExecutor
+import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.RegisterExecutor
+import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.RegisterExecutorFailed
+import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.RemoveExecutor
+import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.KillTask
+import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.GetStageContext
+import org.apache.spark.scheduler.WorkerOffer
+import org.apache.spark.scheduler.SlaveLost
+import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.LaunchTask
+import akka.remote.DisassociatedEvent
+import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.AddStageContext
 
 /**
  * A scheduler backend that waits for coarse grained executors to connect to it through Akka.
@@ -47,8 +58,9 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
   // Use an atomic variable to track total number of cores in the cluster for simplicity and speed
   var totalCoreCount = new AtomicInteger(0)
   val conf = scheduler.sc.conf
-  private val timeout = AkkaUtils.askTimeout(conf)
+  private val jobToJobContext = new HashMap[Int, JobContext]
 
+  private val timeout = AkkaUtils.askTimeout(conf)
   class DriverActor(sparkProperties: Seq[(String, String)]) extends Actor {
     private val executorActor = new HashMap[String, ActorRef]
     private val executorAddress = new HashMap[String, Address]
@@ -101,6 +113,9 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
       case ReviveOffers =>
         makeOffers()
 
+      case GetStageContext(executorId, taskId) =>
+        executorActor(executorId) ! executorHost
+
       case KillTask(taskId, executorId, interruptThread) =>
         executorActor(executorId) ! KillTask(taskId, executorId, interruptThread)
 
@@ -122,6 +137,9 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
       case DisassociatedEvent(_, address, _) =>
         addressToExecutorId.get(address).foreach(removeExecutor(_,
           "remote Akka client disassociated"))
+
+      case AddStageContext(jobId, stage) =>
+        addStageContext(jobId, stage)
 
     }
 
@@ -159,6 +177,17 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
         totalCoreCount.addAndGet(-numCores)
         scheduler.executorLost(executorId, SlaveLost(reason))
       }
+    }
+
+    def addStageContext(jobId: Int, stage: org.apache.spark.scheduler.Stage) {
+      val stageContext = new HashMap[Int, String]
+      val hosts = executorHost.values.toArray
+      (0 to stage.numTasks).foreach(index => {
+        val host = hosts(index / hosts.size)
+        stageContext(index) = host
+      }
+      )
+      jobToJobContext(jobId).stageContexts.put(stage.id, stageContext)
     }
   }
 
@@ -224,6 +253,20 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
       case e: Exception =>
         throw new SparkException("Error notifying standalone scheduler's driver actor", e)
     }
+  }
+
+  override def addStageContext(jobId: Int, stage: org.apache.spark.scheduler.Stage) {
+    var jobContext = jobToJobContext(jobId)
+    if (jobContext == null) {
+      jobContext = new JobContext(jobId)
+      jobToJobContext.put(jobId, jobContext)
+    }
+
+    driverActor ! AddStageContext (jobId, stage)
+  }
+
+  override def getJobContext(jobId: Int): JobContext = {
+    jobToJobContext(jobId)
   }
 }
 
