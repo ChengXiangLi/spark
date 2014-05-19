@@ -25,7 +25,7 @@ public class ShuffleOutputClient {
         }
     }
 
-    public void Sendfile(String filePath, String targetPath) throws IOException {
+    public void sendFile(String filePath, String targetPath) throws IOException {
 
         int targetPathSize = targetPath.getBytes().length;
         ByteBuffer bb = ByteBuffer.allocate(targetPathSize + 4);

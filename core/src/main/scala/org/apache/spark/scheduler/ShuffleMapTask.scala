@@ -104,12 +104,13 @@ private[spark] class ShuffleMapTask(
                                      var rdd: RDD[_],
                                      var dep: ShuffleDependency[_, _],
                                      _partitionId: Int,
-                                     @transient private var locs: Seq[TaskLocation])
+                                     @transient private var locs: Seq[TaskLocation],
+                                     var jobContext: JobContext)
   extends Task[MapStatus](stageId, _partitionId)
   with Externalizable
   with Logging {
 
-  val files: HashMap[Int, File]  = new HashMap[Int, File]
+  val files: HashMap[Int, File] = new HashMap[Int, File]
 
   val shuffleClients: HashMap[String, ShuffleOutputClient] = new HashMap[String, ShuffleOutputClient]
 
@@ -131,6 +132,7 @@ private[spark] class ShuffleMapTask(
       out.writeInt(partitionId)
       out.writeLong(epoch)
       out.writeObject(split)
+      out.writeObject(jobContext)
     }
   }
 
@@ -145,22 +147,35 @@ private[spark] class ShuffleMapTask(
     partitionId = in.readInt()
     epoch = in.readLong()
     split = in.readObject().asInstanceOf[Partition]
+    jobContext = in.readObject().asInstanceOf[JobContext]
   }
 
-  override def pushData(stageContext: HashMap[Int, String]) {
-    val shuffle = SparkEnv.get.blockManager.shuffleBlockManager.forMapTask(dep.shuffleId, partitionId, dep.partitioner.numPartitions, Serializer.getSerializer(dep.serializer))
-    shuffle.writers.zipWithIndex.foreach {
-      case (writer, index) => {
-        val file = writer.asInstanceOf[DiskBlockObjectWriter].getFile
+  override def pushData() {
+    val stageContext: HashMap[Int, String] = jobContext.stageContexts(stageId)
+    files.foreach {
+      case (index, file) => {
         val host = stageContext(index)
         var client = shuffleClients(host)
-        if(client == null) {
+        if (client == null) {
           client = new ShuffleOutputClient(host, 9026)
           shuffleClients(host) = client
         }
-        client.Sendfile(file.getCanonicalPath, file.getCanonicalPath)
+        val fileName = file.getName
+        val reduceId = getReduceIdByShuffleFileName(fileName)
+        val localDir = SparkEnv.get.conf.get("spark.local.dir", System.getProperty("java.io.tmpdir"))
+        val targetPath = localDir + File.pathSeparator + getShuffleIdByShuffleFilename(fileName) +
+          File.pathSeparator + reduceId + File.pathSeparator + fileName
+        client.sendFile(file.getCanonicalPath, targetPath)
       }
     }
+  }
+
+  def getReduceIdByShuffleFileName(fileName: String): String = {
+    fileName.split("_")(3)
+  }
+
+  def getShuffleIdByShuffleFilename(fileName: String): String = {
+    fileName.split("_")(1)
   }
 
   override def runTask(context: TaskContext): MapStatus = {

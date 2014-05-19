@@ -92,12 +92,6 @@ private[spark] class CoarseGrainedExecutorBackend(
   override def statusUpdate(taskId: Long, state: TaskState, data: ByteBuffer) {
     driver ! StatusUpdate(executorId, taskId, state, data)
   }
-
-  override def getStageContext(taskId: Long): HashMap[Int, String] = {
-    val result = driver ! GetStageContext(executorId, taskId)
-    logError("getExecutorhost:" + result.getClass)
-    result.asInstanceOf[HashMap[Int, String]]
-  }
 }
 
 private[spark] object CoarseGrainedExecutorBackend {

@@ -25,10 +25,10 @@ import scala.concurrent.duration._
 
 import akka.actor._
 import akka.pattern.ask
-import akka.remote.{DisassociatedEvent, RemotingLifecycleEvent}
+import akka.remote.RemotingLifecycleEvent
 
 import org.apache.spark.{Logging, SparkException, TaskState}
-import org.apache.spark.scheduler.{JobContext, SchedulerBackend, SlaveLost, TaskDescription, TaskSchedulerImpl, WorkerOffer}
+import org.apache.spark.scheduler.{JobContext, SchedulerBackend, TaskDescription, TaskSchedulerImpl}
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
 import org.apache.spark.util.{AkkaUtils, Utils}
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.RegisteredExecutor
@@ -36,7 +36,6 @@ import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.RegisterE
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.RegisterExecutorFailed
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.RemoveExecutor
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.KillTask
-import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.GetStageContext
 import org.apache.spark.scheduler.WorkerOffer
 import org.apache.spark.scheduler.SlaveLost
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.LaunchTask
@@ -112,9 +111,6 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
 
       case ReviveOffers =>
         makeOffers()
-
-      case GetStageContext(executorId, taskId) =>
-        executorActor(executorId) ! executorHost
 
       case KillTask(taskId, executorId, interruptThread) =>
         executorActor(executorId) ! KillTask(taskId, executorId, interruptThread)

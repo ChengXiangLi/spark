@@ -249,7 +249,7 @@ private[spark] class Executor(
 
         execBackend.statusUpdate(taskId, TaskState.FINISHED, serializedResult)
         logInfo("Finished task ID " + taskId)
-        task.pushData(execBackend.getStageContext(taskId))
+        task.pushData()
         execBackend.statusUpdate(taskId, TaskState.PUSHED, serializedResult)
         logInfo("Task[" + taskId + "] outputs have been pushed to reduce side.")
       } catch {

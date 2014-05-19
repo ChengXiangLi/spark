@@ -27,6 +27,4 @@ import scala.collection.mutable
  */
 private[spark] trait ExecutorBackend {
   def statusUpdate(taskId: Long, state: TaskState, data: ByteBuffer)
-
-  def getStageContext(taskId: Long): mutable.HashMap[Int, String]
 }

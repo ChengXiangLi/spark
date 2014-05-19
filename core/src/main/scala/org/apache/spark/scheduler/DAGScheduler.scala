@@ -775,7 +775,7 @@ class DAGScheduler(
           locs = getPreferredLocs(stage.rdd, p)
         } else
           locs = getPreferredLocs(p, jobId, stage.id)
-        tasks += new ShuffleMapTask(stage.id, stage.rdd, stage.shuffleDep.get, p, locs)
+        tasks += new ShuffleMapTask(stage.id, stage.rdd, stage.shuffleDep.get, p, locs, taskScheduler.getJobContext(jobId))
       }
     } else {
       // This is a final stage; figure out its job's missing partitions
