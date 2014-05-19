@@ -179,7 +179,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
       val stageContext = new HashMap[Int, String]
       val hosts = executorHost.values.toArray
       (0 to stage.numTasks).foreach(index => {
-        val host = hosts(index / hosts.size)
+        val host = hosts(index % hosts.size)
         stageContext(index) = host
       }
       )
@@ -253,12 +253,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
   }
 
   override def addStageContext(jobId: Int, stage: org.apache.spark.scheduler.Stage) {
-    var jobContext = jobToJobContext(jobId)
-    if (jobContext == null) {
-      jobContext = new JobContext(jobId)
-      jobToJobContext.put(jobId, jobContext)
-    }
-
+    var jobContext = jobToJobContext.getOrElseUpdate(jobId, new JobContext(jobId))
     driverActor ! AddStageContext (jobId, stage)
   }
 
