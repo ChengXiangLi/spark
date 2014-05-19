@@ -183,6 +183,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
         stageContext(index) = host
       }
       )
+      logInfo("jobId:" + jobId + " stageId:" + stage.id + " stage context:" + stageContext)
       jobToJobContext(jobId).stageContexts.put(stage.id, stageContext)
     }
   }

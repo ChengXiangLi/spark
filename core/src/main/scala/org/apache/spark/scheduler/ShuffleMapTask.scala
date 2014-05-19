@@ -163,9 +163,12 @@ private[spark] class ShuffleMapTask(
         val fileName = file.getName
         val reduceId = getReduceIdByShuffleFileName(fileName)
         val localDir = SparkEnv.get.conf.get("spark.local.dir", System.getProperty("java.io.tmpdir"))
-        val targetPath = localDir + File.pathSeparator + getShuffleIdByShuffleFilename(fileName) +
+        val shuffleId = getShuffleIdByShuffleFilename(fileName)
+        val targetPath = localDir + File.pathSeparator + shuffleId +
           File.pathSeparator + reduceId + File.pathSeparator + fileName
         client.sendFile(file.getCanonicalPath, targetPath)
+        logInfo("shuffle map task push data, shuffleId:" + shuffleId + " reduceId:" + reduceId + "fileName:" +
+          fileName + "from path:" + file.getCanonicalPath + "target path:" + targetPath)
       }
     }
   }
