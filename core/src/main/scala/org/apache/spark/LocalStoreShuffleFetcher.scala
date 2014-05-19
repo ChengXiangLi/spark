@@ -1,7 +1,7 @@
 package org.apache.spark
 
 import org.apache.spark.serializer.Serializer
-import java.io.File
+import java.io.{FileInputStream, File}
 
 
 private[spark] class LocalStoreShuffleFetcher extends ShuffleFetcher with Logging {
@@ -16,16 +16,32 @@ private[spark] class LocalStoreShuffleFetcher extends ShuffleFetcher with Loggin
     val dirPath = localDir + File.pathSeparator + shuffleId + File.pathSeparator + reduceId
     val dir = new File(dirPath)
     val files = dir.listFiles()
-    new Iterator[Any]{
+    val combineIter = new Iterator[Any]{
+      val iters: Seq[Iterator] = files.map(file => {
+        val stream = new FileInputStream(file)
+        serializer.newInstance().deserializeStream(stream).asIterator
+      })
+      var index = 0
       def hasNext: Boolean = {
-        false
+        if (iters(index).hasNext) {
+          true
+        } else {
+          while (index < iters.size) {
+            index += 1
+            if (iters(index).hasNext) {
+              true
+            }
+          }
+          false
+        }
       }
 
       def next(): Any = {
-        null
+        iters(index).next()
       }
     }
-    null
+
+    new InterruptibleIterator[T](context, combineIter.asInstanceOf[Iterator[T]])
   }
 
   override def stop {
