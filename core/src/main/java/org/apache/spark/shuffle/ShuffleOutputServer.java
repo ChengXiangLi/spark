@@ -1,5 +1,8 @@
 package org.apache.spark.shuffle;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -10,7 +13,8 @@ import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 
 
-public class ShuffleOutpuServer {
+public class ShuffleOutputServer {
+    Logger log = LoggerFactory.getLogger(this.getClass());
     ServerSocketChannel listener = null;
 
     public void mySetup() {
@@ -21,16 +25,16 @@ public class ShuffleOutpuServer {
             ServerSocket ss = listener.socket();
             ss.setReuseAddress(true);
             ss.bind(listenAddr);
-            System.out.println("Listening on port : " + listenAddr.toString());
+            log.info("Listening on port : " + listenAddr.toString());
         } catch (IOException e) {
-            System.out.println("Failed to bind, is port : " + listenAddr.toString()
+            log.error("Failed to bind, is port : " + listenAddr.toString()
                     + " already in use ? Error Msg : " + e.getMessage());
             e.printStackTrace();
         }
     }
 
     public static void main(String[] args) {
-        ShuffleOutpuServer dns = new ShuffleOutpuServer();
+        ShuffleOutputServer dns = new ShuffleOutputServer();
         dns.mySetup();
         dns.readData();
     }
@@ -49,10 +53,12 @@ public class ShuffleOutpuServer {
                 byte[] pathByte = new byte[size];
                 dst.get(pathByte);
                 String path = new String(pathByte);
-
+                log.info("read file:" + path);
                 File file = new File(path);
                 if(file.exists()) {
                     file.delete();
+                } else {
+                    file.createNewFile();
                 }
                 FileOutputStream outputStream = new FileOutputStream(file, false);
                 int len = nread - 4 - size;

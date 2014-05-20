@@ -27,8 +27,6 @@ import org.apache.spark.TaskState.TaskState
 import org.apache.spark.deploy.worker.WorkerWatcher
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
 import org.apache.spark.util.{AkkaUtils, Utils}
-import scala.collection.mutable.HashMap
-import org.apache.spark.shuffle.ShuffleOutpuServer
 
 private[spark] class CoarseGrainedExecutorBackend(
     driverUrl: String,
@@ -115,10 +113,6 @@ private[spark] object CoarseGrainedExecutorBackend {
       actorSystem.actorOf(Props(classOf[WorkerWatcher], url), name = "WorkerWatcher")
     }
     actorSystem.awaitTermination()
-
-    val shuffleOutputServer: ShuffleOutpuServer = new ShuffleOutpuServer
-    shuffleOutputServer.mySetup
-    shuffleOutputServer.readData
   }
 
   def main(args: Array[String]) {

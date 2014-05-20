@@ -19,7 +19,7 @@ package org.apache.spark.scheduler.cluster
 
 import java.util.concurrent.atomic.AtomicInteger
 
-import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
+import scala.collection.mutable.{ListBuffer, ArrayBuffer, HashMap, HashSet}
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
@@ -57,7 +57,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
   var totalCoreCount = new AtomicInteger(0)
   val conf = scheduler.sc.conf
   val jobToJobContext = new HashMap[Int, JobContext]
-  var hosts: Seq[String] = List()
+  var hosts = new ListBuffer[String]()
 
   private val timeout = AkkaUtils.askTimeout(conf)
   class DriverActor(sparkProperties: Seq[(String, String)]) extends Actor {
@@ -244,7 +244,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
 
   def addStageContext(jobContext: JobContext, stage: org.apache.spark.scheduler.Stage) {
     val stageContext = new HashMap[Int, String]
-    (0 to stage.numTasks).foreach(index => {
+    (0 to stage.shuffleDep.get.partitioner.numPartitions).foreach(index => {
       val host = hosts(index % hosts.size)
       stageContext(index) = host
     }

@@ -1,5 +1,8 @@
 package org.apache.spark.shuffle;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -10,7 +13,7 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.SocketChannel;
 
 public class ShuffleOutputClient {
-
+    Logger log = LoggerFactory.getLogger(this.getClass());
     SocketChannel sc = null;
 
     public ShuffleOutputClient(String host, int port) {
@@ -20,7 +23,9 @@ public class ShuffleOutputClient {
             sc.connect(sad);
             sc.configureBlocking(true);
             sc.finishConnect();
+            System.out.printf("connect to shuffle output server %s:%d\n", host, port);
         } catch (IOException e) {
+            System.out.printf("failed connect to shuffle output server %s:%d\n", host, port);
             e.printStackTrace();
         }
     }

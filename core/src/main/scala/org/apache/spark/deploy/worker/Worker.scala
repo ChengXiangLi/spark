@@ -35,6 +35,8 @@ import org.apache.spark.deploy.master.{DriverState, Master}
 import org.apache.spark.deploy.worker.ui.WorkerWebUI
 import org.apache.spark.metrics.MetricsSystem
 import org.apache.spark.util.{AkkaUtils, Utils}
+import org.apache.spark.shuffle.ShuffleOutputServer
+import java.util.concurrent.Executors
 
 /**
   * @param masterUrls Each url should look like spark://host:port.
@@ -136,6 +138,16 @@ private[spark] class Worker(
 
     metricsSystem.registerSource(workerSource)
     metricsSystem.start()
+
+    val pool = Executors.newFixedThreadPool(1)
+    pool.execute(new Runnable with Logging {
+      override def run() {
+        logInfo("start thread to run shuffle output server.")
+        val shuffleOutputServer: ShuffleOutputServer = new ShuffleOutputServer
+        shuffleOutputServer.mySetup
+        shuffleOutputServer.readData
+      }
+    })
   }
 
   def changeMaster(url: String, uiUrl: String) {
