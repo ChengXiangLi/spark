@@ -282,7 +282,7 @@ private[spark] class TaskSchedulerImpl(
         }
         taskIdToTaskSetId.get(tid) match {
           case Some(taskSetId) =>
-            if (TaskState.isFinished(state)) {
+            if (TaskState.isFinished(state) && !state.equals(TaskState.FINISHED)) {
               taskIdToTaskSetId.remove(tid)
               taskIdToExecutorId.remove(tid)
             }

@@ -774,7 +774,7 @@ class DAGScheduler(
         if (stage.parents.size == 0) {
           locs = getPreferredLocs(stage.rdd, p)
         } else
-          locs = getPreferredLocs(p, jobId, stage.id)
+          locs = getPreferredLocs(p, jobId, stage.parents.head.id)
         tasks += new ShuffleMapTask(stage.id, stage.rdd, stage.shuffleDep.get, p, locs, taskScheduler.getJobContext(jobId))
       }
     } else {
@@ -786,7 +786,7 @@ class DAGScheduler(
         if (stage.parents.size == 0) {
           locs = getPreferredLocs(stage.rdd, partition)
         } else
-          locs = getPreferredLocs(partition, jobId, stage.id)
+          locs = getPreferredLocs(partition, jobId, stage.parents.head.id)
         tasks += new ResultTask(stage.id, stage.rdd, job.func, partition, locs, id)
       }
     }

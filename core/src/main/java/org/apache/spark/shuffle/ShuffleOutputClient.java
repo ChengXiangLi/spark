@@ -51,7 +51,7 @@ public class ShuffleOutputClient {
         bb.flip();
         sc.write(bb);
 
-        long fsize = 100000L, sendzise = 4094;
+        long fsize = 2000000L, sendzise = 4094;
 
         FileChannel fc = new FileInputStream(filePath).getChannel();
         long start = System.currentTimeMillis();
