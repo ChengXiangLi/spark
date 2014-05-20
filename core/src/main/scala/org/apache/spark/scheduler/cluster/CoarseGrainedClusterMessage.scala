@@ -39,8 +39,6 @@ private[spark] object CoarseGrainedClusterMessages {
 
   case class RegisterExecutorFailed(message: String) extends CoarseGrainedClusterMessage
 
-  case class AddStageContext(jobId: Int, stage: org.apache.spark.scheduler.Stage) extends CoarseGrainedClusterMessage
-
   // Executors to driver
   case class RegisterExecutor(executorId: String, hostPort: String, cores: Int)
     extends CoarseGrainedClusterMessage {

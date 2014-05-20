@@ -217,18 +217,13 @@ private[spark] class ShuffleMapTask(
 
       shuffle.writers.zipWithIndex.foreach {
         case (writer, index) => {
-          val file = writer.asInstanceOf[DiskBlockObjectWriter].getFile
+          val file = writer.asInstanceOf[DiskBlockObjectWriter].file
           files(index) = file
         }
       }
 
-      val start = System.currentTimeMillis();
-      shuffleBlockManager.pushBlockData()
-      val pushDataCostTime = System.currentTimeMillis() - start;
-
       // Update shuffle metrics.
       val shuffleMetrics = new ShuffleWriteMetrics
-      shuffleMetrics.shufflePushDataTime = pushDataCostTime
       shuffleMetrics.shuffleBytesWritten = totalBytes
       shuffleMetrics.shuffleWriteTime = totalTime
       metrics.get.shuffleWriteMetrics = Some(shuffleMetrics)

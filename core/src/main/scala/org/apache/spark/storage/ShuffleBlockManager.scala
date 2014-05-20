@@ -169,10 +169,6 @@ class ShuffleBlockManager(blockManager: BlockManager) extends Logging {
     throw new IllegalStateException("Failed to find shuffle block: " + id)
   }
 
-  def pushBlockData() {
-
-  }
-
   /** Remove all the blocks / files and metadata related to a particular shuffle. */
   def removeShuffle(shuffleId: ShuffleId): Boolean = {
     // Do not change the ordering of this, if shuffleStates should be removed only

@@ -40,7 +40,6 @@ import org.apache.spark.scheduler.WorkerOffer
 import org.apache.spark.scheduler.SlaveLost
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.LaunchTask
 import akka.remote.DisassociatedEvent
-import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.AddStageContext
 
 /**
  * A scheduler backend that waits for coarse grained executors to connect to it through Akka.
@@ -57,7 +56,8 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
   // Use an atomic variable to track total number of cores in the cluster for simplicity and speed
   var totalCoreCount = new AtomicInteger(0)
   val conf = scheduler.sc.conf
-  private val jobToJobContext = new HashMap[Int, JobContext]
+  val jobToJobContext = new HashMap[Int, JobContext]
+  var hosts: Seq[String] = List()
 
   private val timeout = AkkaUtils.askTimeout(conf)
   class DriverActor(sparkProperties: Seq[(String, String)]) extends Actor {
@@ -88,6 +88,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
           sender ! RegisteredExecutor(sparkProperties)
           executorActor(executorId) = sender
           executorHost(executorId) = Utils.parseHostPort(hostPort)._1
+          hosts += Utils.parseHostPort(hostPort)._1
           totalCores(executorId) = cores
           freeCores(executorId) = cores
           executorAddress(executorId) = sender.path.address
@@ -133,10 +134,6 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
       case DisassociatedEvent(_, address, _) =>
         addressToExecutorId.get(address).foreach(removeExecutor(_,
           "remote Akka client disassociated"))
-
-      case AddStageContext(jobId, stage) =>
-        addStageContext(jobId, stage)
-
     }
 
     // Make fake resource offers on all executors
@@ -173,18 +170,6 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
         totalCoreCount.addAndGet(-numCores)
         scheduler.executorLost(executorId, SlaveLost(reason))
       }
-    }
-
-    def addStageContext(jobId: Int, stage: org.apache.spark.scheduler.Stage) {
-      val stageContext = new HashMap[Int, String]
-      val hosts = executorHost.values.toArray
-      (0 to stage.numTasks).foreach(index => {
-        val host = hosts(index % hosts.size)
-        stageContext(index) = host
-      }
-      )
-      logInfo("jobId:" + jobId + " stageId:" + stage.id + " stage context:" + stageContext)
-      jobToJobContext(jobId).stageContexts.put(stage.id, stageContext)
     }
   }
 
@@ -253,8 +238,20 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
   }
 
   override def addStageContext(jobId: Int, stage: org.apache.spark.scheduler.Stage) {
-    var jobContext = jobToJobContext.getOrElseUpdate(jobId, new JobContext(jobId))
-    driverActor ! AddStageContext (jobId, stage)
+    val jobContext = jobToJobContext.getOrElseUpdate(jobId, new JobContext(jobId))
+    addStageContext(jobContext, stage)
+  }
+
+  def addStageContext(jobContext: JobContext, stage: org.apache.spark.scheduler.Stage) {
+    val stageContext = new HashMap[Int, String]
+    (0 to stage.numTasks).foreach(index => {
+      val host = hosts(index % hosts.size)
+      stageContext(index) = host
+    }
+    )
+    logInfo("add stage context to job context. jobId:" + jobContext.jobId +
+      " stageId:" + stage.id + " stage context:" + stageContext)
+    jobContext.stageContexts.put(stage.id, stageContext)
   }
 
   override def getJobContext(jobId: Int): JobContext = {

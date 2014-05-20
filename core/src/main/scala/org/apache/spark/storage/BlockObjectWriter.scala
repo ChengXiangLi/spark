@@ -74,7 +74,7 @@ private[spark] abstract class BlockObjectWriter(val blockId: BlockId) {
 /** BlockObjectWriter which writes directly to a file on disk. Appends to the given file. */
 private[spark] class DiskBlockObjectWriter(
     blockId: BlockId,
-    file: File,
+    val file: File,
     serializer: Serializer,
     bufferSize: Int,
     compressStream: OutputStream => OutputStream,
@@ -189,9 +189,5 @@ private[spark] class DiskBlockObjectWriter(
   // Only valid if called after commit()
   override def bytesWritten: Long = {
     lastValidPosition - initialPosition
-  }
-
-  def getFile: File = {
-    file
   }
 }
