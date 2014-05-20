@@ -156,7 +156,7 @@ private[spark] class ShuffleMapTask(
     files.foreach {
       case (index, file) => {
         val host = stageContext(index)
-        val client = shuffleClients.getOrElseUpdate(host, new ShuffleOutputClient(host, 9026))
+        val client = new ShuffleOutputClient(host, 9026)
         val fileName = file.getName
         val reduceId = getReduceIdByShuffleFileName(fileName)
         val localDir = SparkEnv.get.conf.get("spark.local.dir", System.getProperty("java.io.tmpdir"))
@@ -164,9 +164,10 @@ private[spark] class ShuffleMapTask(
         val pathSeparator = System.getProperties.getProperty("path.deparator", "/")
         val targetPath = localDir + pathSeparator + shuffleId +
           pathSeparator + reduceId + pathSeparator + fileName
-        logInfo("shuffle map task push data, shuffleId:" + shuffleId + " reduceId:" + reduceId + "fileName:" +
-          fileName + "from path:" + file.getCanonicalPath + "target path:" + targetPath)
+        logInfo("shuffle map task push data, shuffleId:" + shuffleId + ", reduceId:" + reduceId + ", fileName:" +
+          fileName)
         client.sendFile(file.getCanonicalPath, targetPath)
+        logInfo("transfer file from local:" + file.getCanonicalPath + ",to node" + client.getHost + " target path:" + targetPath)
       }
     }
   }

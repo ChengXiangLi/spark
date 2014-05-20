@@ -53,11 +53,15 @@ public class ShuffleOutputServer {
                 byte[] pathByte = new byte[size];
                 dst.get(pathByte);
                 String path = new String(pathByte);
-                log.info("read file:" + path);
+                System.out.println("start to write file:" + path);
                 File file = new File(path);
                 if(file.exists()) {
                     file.delete();
                 } else {
+                    File parent = new File(file.getParent());
+                    if (!parent.exists()) {
+                        parent.mkdirs();
+                    }
                     file.createNewFile();
                 }
                 FileOutputStream outputStream = new FileOutputStream(file, false);
@@ -82,6 +86,7 @@ public class ShuffleOutputServer {
 
                 outputStream.flush();
                 outputStream.close();
+                System.out.println("finished write file:" + path);
             }
         } catch (IOException e) {
             e.printStackTrace();

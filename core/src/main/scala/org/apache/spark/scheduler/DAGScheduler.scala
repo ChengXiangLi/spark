@@ -771,7 +771,7 @@ class DAGScheduler(
     if (stage.isShuffleMap) {
       for (p <- 0 until stage.numPartitions if stage.outputLocs(p) == Nil) {
         var locs:Seq[TaskLocation] = null
-        if (stage.parents == null) {
+        if (stage.parents.size == 0) {
           locs = getPreferredLocs(stage.rdd, p)
         } else
           locs = getPreferredLocs(p, jobId, stage.id)
@@ -783,7 +783,7 @@ class DAGScheduler(
       for (id <- 0 until job.numPartitions if !job.finished(id)) {
         val partition = job.partitions(id)
         var locs:Seq[TaskLocation] = null
-        if (stage.parents == null) {
+        if (stage.parents.size == 0) {
           locs = getPreferredLocs(stage.rdd, partition)
         } else
           locs = getPreferredLocs(partition, jobId, stage.id)

@@ -15,8 +15,20 @@ import java.nio.channels.SocketChannel;
 public class ShuffleOutputClient {
     Logger log = LoggerFactory.getLogger(this.getClass());
     SocketChannel sc = null;
+    String host;
+    int port;
+
+    public String getHost() {
+        return host;
+    }
+
+    public int getPort() {
+        return port;
+    }
 
     public ShuffleOutputClient(String host, int port) {
+        this.host = host;
+        this.port = port;
         SocketAddress sad = new InetSocketAddress(host, port);
         try {
             sc = SocketChannel.open();
@@ -45,7 +57,9 @@ public class ShuffleOutputClient {
         long start = System.currentTimeMillis();
         long nsent = 0, curnset = 0;
         curnset = fc.transferTo(0, fsize, sc);
+        System.out.printf("finished transfer data from:" + filePath + ", to node:" + host + ", remote path:" + targetPath +"\n");
         System.out.println("total bytes transferred--" + curnset + " and time taken in MS--" + (System.currentTimeMillis() - start));
         fc.close();
+        sc.close();
     }
 }
