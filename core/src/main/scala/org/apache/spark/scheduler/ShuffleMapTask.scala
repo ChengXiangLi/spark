@@ -29,6 +29,8 @@ import org.apache.spark.rdd.{RDD, RDDCheckpointData}
 import org.apache.spark.serializer.Serializer
 import org.apache.spark.storage._
 import org.apache.spark.shuffle.ShuffleOutputClient
+import java.net.InetAddress
+import java.nio.file.{FileSystems, Files}
 
 private[spark] object ShuffleMapTask {
 
@@ -151,23 +153,41 @@ private[spark] class ShuffleMapTask(
   }
 
   override def pushData() {
-    logInfo("push data stageId:" + stageId + " jobContext:" + jobContext)
-    val stageContext: HashMap[Int, String] = jobContext.stageContexts.values.head
+    val stageContext: HashMap[Int, String] = jobContext.stageContexts(0)
     files.foreach {
       case (index, file) => {
-        val host = stageContext(index)
-        val client = new ShuffleOutputClient(host, 9026)
-        val fileName = file.getName
-        val reduceId = getReduceIdByShuffleFileName(fileName)
-        val localDir = SparkEnv.get.conf.get("spark.local.dir", System.getProperty("java.io.tmpdir"))
-        val shuffleId = getShuffleIdByShuffleFilename(fileName)
-        val pathSeparator = System.getProperties.getProperty("path.deparator", "/")
-        val targetPath = localDir + pathSeparator + shuffleId +
-          pathSeparator + reduceId + pathSeparator + fileName
-        logInfo("shuffle map task push data, shuffleId:" + shuffleId + ", reduceId:" + reduceId + ", fileName:" +
-          fileName)
-        client.sendFile(file.getCanonicalPath, targetPath)
-        logInfo("transfer file from local:" + file.getCanonicalPath + ",to node" + client.getHost + " target path:" + targetPath)
+        if (file.exists()) {
+          val host = stageContext(index)
+          val localhost = InetAddress.getLocalHost.getHostName
+          logInfo("push data source host:" + localhost + ", target host:" + host)
+          val fileName = file.getName
+          val reduceId = getReduceIdByShuffleFileName(fileName)
+          val localDir = SparkEnv.get.conf.get("spark.local.dir", System.getProperty("java.io.tmpdir"))
+          val shuffleId = getShuffleIdByShuffleFilename(fileName)
+          val pathSeparator = System.getProperties.getProperty("path.deparator", "/")
+          val targetPath = localDir + pathSeparator + shuffleId +
+            pathSeparator + reduceId + pathSeparator + fileName
+          if (false | host.equals(localhost)) {
+            val toPath = FileSystems.getDefault.getPath(targetPath)
+            val fromPath = FileSystems.getDefault.getPath(file.getCanonicalPath)
+            val targetDir = localDir + pathSeparator + shuffleId +
+              pathSeparator + reduceId
+            val targetDirFolder = new File(targetDir)
+            if (!targetDirFolder.exists()) {
+              targetDirFolder.mkdirs()
+            }
+            logInfo("try to create link:" + toPath + " from source:" + fromPath)
+            Files.createSymbolicLink(toPath, fromPath);
+          } else {
+            val start = System.currentTimeMillis()
+            val client = new ShuffleOutputClient(host, 9026)
+            logInfo("shuffle map task push data, shuffleId:" + shuffleId + ", reduceId:" + reduceId + ", fileName:" +
+              fileName)
+            client.sendFile(file.getCanonicalPath, targetPath)
+            logInfo("transfer file from local:" + file.getCanonicalPath + ",to node" + client.getHost + " target path:" +
+              targetPath + ", cost:" + (System.currentTimeMillis() - start) + "ms")
+          }
+        }
       }
     }
   }

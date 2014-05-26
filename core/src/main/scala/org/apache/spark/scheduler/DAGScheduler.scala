@@ -734,6 +734,7 @@ class DAGScheduler(
   /** Submits stage, but first recursively submits any missing parents. */
   private def submitStage(stage: Stage) {
     val jobId = activeJobForStage(stage)
+    addStageContext(jobId.get, stage)
     if (jobId.isDefined) {
       logDebug("submitStage(" + stage + ")")
       if (!waitingStages(stage) && !runningStages(stage) && !failedStages(stage)) {
@@ -741,7 +742,6 @@ class DAGScheduler(
         logDebug("missing: " + missing)
         if (missing == Nil) {
           logInfo("Submitting " + stage + " (" + stage.rdd + "), which has no missing parents")
-          addStageContext(jobId.get, stage)
           submitMissingTasks(stage, jobId.get)
           runningStages += stage
         } else {
@@ -786,7 +786,7 @@ class DAGScheduler(
         if (stage.parents.size == 0) {
           locs = getPreferredLocs(stage.rdd, partition)
         } else
-          locs = getPreferredLocs(partition, jobId, stage.parents.head.id)
+          locs = getPreferredLocs(stage.rdd.partitions(partition).index, jobId, stage.id)
         tasks += new ResultTask(stage.id, stage.rdd, job.func, partition, locs, id)
       }
     }
@@ -1173,7 +1173,9 @@ class DAGScheduler(
   def getPreferredLocs(partition: Int, jobId: Int, stageId: Int): Seq[TaskLocation] = synchronized {
     val jobContext = taskScheduler.getJobContext(jobId)
     val stageContext = jobContext.stageContexts(stageId)
+//    logInfo("schedule result task, stage context:" + stageContext)
     val host = stageContext(partition)
+    logInfo("get preferred location, stage id:"+ stageId +", split id:" + partition + ", host:" + host)
     Seq(TaskLocation(host))
   }
 

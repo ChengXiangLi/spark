@@ -99,7 +99,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
 
       case StatusUpdate(executorId, taskId, state, data) =>
         scheduler.statusUpdate(taskId, state, data.value)
-        if (TaskState.isFinished(state)) {
+        if (TaskState.isFinished(state) && !TaskState.PUSHED.equals(state)) {
           if (executorActor.contains(executorId)) {
             freeCores(executorId) += scheduler.CPUS_PER_TASK
             makeOffers(executorId)
@@ -244,13 +244,9 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
 
   def addStageContext(jobContext: JobContext, stage: org.apache.spark.scheduler.Stage) {
     val stageContext = new HashMap[Int, String]
-    (0 to stage.shuffleDep.get.partitioner.numPartitions).foreach(index => {
-      val host = hosts(index % hosts.size)
-      stageContext(index) = host
-    }
-    )
-    logInfo("add stage context to job context. jobId:" + jobContext.jobId +
-      " stageId:" + stage.id + " stage context:" + stageContext)
+    stage.rdd.partitions.foreach(partition => {
+      stageContext(partition.index) = hosts(partition.index % hosts.size)
+    })
     jobContext.stageContexts.put(stage.id, stageContext)
   }
 

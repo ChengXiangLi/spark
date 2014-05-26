@@ -20,10 +20,10 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 public class ShuffleOutputServer {
     Logger log = LoggerFactory.getLogger(this.getClass());
     ServerSocketChannel listener = null;
-    Executor executor = Executors.newFixedThreadPool(4);
+    Executor executor = Executors.newFixedThreadPool(20);
     ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
     Map<String, Queue<String>> allAvailableFiles = new HashMap<String, Queue<String>>();
-    private int MAX_REDUCE_FILE_NUMBER_PER_PARTITION = 4;
+    private int MAX_REDUCE_FILE_NUMBER_PER_PARTITION = 20;
 
     public void mySetup() {
         InetSocketAddress listenAddr = new InetSocketAddress(9026);
