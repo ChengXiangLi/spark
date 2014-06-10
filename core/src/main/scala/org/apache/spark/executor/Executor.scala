@@ -125,6 +125,9 @@ private[spark] class Executor(
   // Start worker thread pool
   val threadPool = Utils.newDaemonCachedThreadPool("Executor task launch worker")
 
+  // Start shuffle thread pool
+  val shufflePool = Utils.newDaemonCachedThreadPool("Executor data shuffle worker")
+
   // Maintains the list of running tasks.
   private val runningTasks = new ConcurrentHashMap[Long, TaskRunner]
 
@@ -135,6 +138,8 @@ private[spark] class Executor(
     runningTasks.put(taskId, tr)
     threadPool.execute(tr)
   }
+
+
 
   def killTask(taskId: Long, interruptThread: Boolean) {
     val tr = runningTasks.get(taskId)
@@ -249,9 +254,11 @@ private[spark] class Executor(
 
         execBackend.statusUpdate(taskId, TaskState.FINISHED, serializedResult)
         logInfo("Finished task ID " + taskId)
+        val start = System.currentTimeMillis();
         task.pushData()
         execBackend.statusUpdate(taskId, TaskState.PUSHED, serializedResult)
-        logInfo("Task[" + taskId + "] outputs have been pushed to reduce side.")
+        logInfo("Task[" + taskId + "] outputs have been pushed to reduce side. totally cost:" +
+          (System.currentTimeMillis() - start) + "ms.")
       } catch {
         case ffe: FetchFailedException => {
           val reason = ffe.toTaskEndReason

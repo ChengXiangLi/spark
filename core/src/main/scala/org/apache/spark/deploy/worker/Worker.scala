@@ -35,31 +35,34 @@ import org.apache.spark.deploy.master.{DriverState, Master}
 import org.apache.spark.deploy.worker.ui.WorkerWebUI
 import org.apache.spark.metrics.MetricsSystem
 import org.apache.spark.util.{AkkaUtils, Utils}
-import org.apache.spark.shuffle.ShuffleOutputServer
+import org.apache.spark.shuffle.{ShufflerWorker, NewShuffleOutputServer, NIOShuffleOutputServer}
 import java.util.concurrent.Executors
+import com.google.common.collect.Lists
+import java.util
 
 /**
-  * @param masterUrls Each url should look like spark://host:port.
-  */
+ * @param masterUrls Each url should look like spark://host:port.
+ */
 private[spark] class Worker(
-    host: String,
-    port: Int,
-    webUiPort: Int,
-    cores: Int,
-    memory: Int,
-    masterUrls: Array[String],
-    actorSystemName: String,
-    actorName: String,
-    workDirPath: String = null,
-    val conf: SparkConf,
-    val securityMgr: SecurityManager)
+                             host: String,
+                             port: Int,
+                             webUiPort: Int,
+                             cores: Int,
+                             memory: Int,
+                             masterUrls: Array[String],
+                             actorSystemName: String,
+                             actorName: String,
+                             workDirPath: String = null,
+                             val conf: SparkConf,
+                             val securityMgr: SecurityManager)
   extends Actor with Logging {
+
   import context.dispatcher
 
   Utils.checkHost(host, "Expected hostname")
-  assert (port > 0)
+  assert(port > 0)
 
-  def createDateFormat = new SimpleDateFormat("yyyyMMddHHmmss")  // For worker and executor IDs
+  def createDateFormat = new SimpleDateFormat("yyyyMMddHHmmss") // For worker and executor IDs
 
   // Send a heartbeat every (heartbeat timeout) / 4 milliseconds
   val HEARTBEAT_MILLIS = conf.getLong("spark.worker.timeout", 60) * 1000 / 4
@@ -80,7 +83,7 @@ private[spark] class Worker(
   var master: ActorSelection = null
   var masterAddress: Address = null
   var activeMasterUrl: String = ""
-  var activeMasterWebUiUrl : String = ""
+  var activeMasterWebUiUrl: String = ""
   val akkaUrl = "akka.tcp://%s@%s:%s/user/%s".format(actorSystemName, host, port, actorName)
   @volatile var registered = false
   @volatile var connected = false
@@ -105,6 +108,7 @@ private[spark] class Worker(
   val workerSource = new WorkerSource(this)
 
   def coresFree: Int = cores - coresUsed
+
   def memoryFree: Int = memory - memoryUsed
 
   def createWorkDir() {
@@ -113,11 +117,11 @@ private[spark] class Worker(
       // This sporadically fails - not sure why ... !workDir.exists() && !workDir.mkdirs()
       // So attempting to create and then check if directory was created or not.
       workDir.mkdirs()
-      if ( !workDir.exists() || !workDir.isDirectory) {
+      if (!workDir.exists() || !workDir.isDirectory) {
         logError("Failed to create work directory " + workDir)
         System.exit(1)
       }
-      assert (workDir.isDirectory)
+      assert(workDir.isDirectory)
     } catch {
       case e: Exception =>
         logError("Failed to create work directory " + workDir, e)
@@ -142,10 +146,15 @@ private[spark] class Worker(
     val pool = Executors.newFixedThreadPool(1)
     pool.execute(new Runnable with Logging {
       override def run() {
-        logInfo("start thread to run shuffle output server.")
-        val shuffleOutputServer: ShuffleOutputServer = new ShuffleOutputServer
-        shuffleOutputServer.mySetup
-        shuffleOutputServer.readData
+        val workerNumber = 10;
+        logInfo("try to start thread to run shuffle output server with " + workerNumber + " workers.")
+        val workers: java.util.List[ShufflerWorker] = new util.ArrayList[ShufflerWorker](workerNumber)
+        (0 to workerNumber).foreach(index => {
+          val shufflerWorker = new ShufflerWorker(Integer.toString(index))
+          new Thread(shufflerWorker, "shuffer output worker " + index).start()
+          workers.add(shufflerWorker)
+        })
+        new Thread(new NewShuffleOutputServer(9026, workers), "shuffle output server").start
       }
     })
   }
@@ -205,7 +214,9 @@ private[spark] class Worker(
 
     case SendHeartbeat =>
       masterLock.synchronized {
-        if (connected) { master ! Heartbeat(workerId) }
+        if (connected) {
+          master ! Heartbeat(workerId)
+        }
       }
 
     case WorkDirCleanup =>
@@ -374,13 +385,13 @@ private[spark] object Worker {
   }
 
   def startSystemAndActor(
-      host: String,
-      port: Int,
-      webUiPort: Int,
-      cores: Int,
-      memory: Int,
-      masterUrls: Array[String],
-      workDir: String, workerNumber: Option[Int] = None): (ActorSystem, Int) = {
+                           host: String,
+                           port: Int,
+                           webUiPort: Int,
+                           cores: Int,
+                           memory: Int,
+                           masterUrls: Array[String],
+                           workDir: String, workerNumber: Option[Int] = None): (ActorSystem, Int) = {
 
     // The LocalSparkCluster runs multiple local sparkWorkerX actor systems
     val conf = new SparkConf
@@ -390,7 +401,7 @@ private[spark] object Worker {
     val (actorSystem, boundPort) = AkkaUtils.createActorSystem(systemName, host, port,
       conf = conf, securityManager = securityMgr)
     actorSystem.actorOf(Props(classOf[Worker], host, boundPort, webUiPort, cores, memory,
-      masterUrls, systemName, actorName,  workDir, conf, securityMgr), name = actorName)
+      masterUrls, systemName, actorName, workDir, conf, securityMgr), name = actorName)
     (actorSystem, boundPort)
   }
 

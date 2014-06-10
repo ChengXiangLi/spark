@@ -28,7 +28,7 @@ import org.apache.spark.executor.ShuffleWriteMetrics
 import org.apache.spark.rdd.{RDD, RDDCheckpointData}
 import org.apache.spark.serializer.Serializer
 import org.apache.spark.storage._
-import org.apache.spark.shuffle.ShuffleOutputClient
+import org.apache.spark.shuffle.{NewShuffleOutputClient, NIOShuffleOutputClient}
 import java.net.InetAddress
 import java.nio.file.{FileSystems, Files}
 
@@ -114,7 +114,7 @@ private[spark] class ShuffleMapTask(
 
   val files: HashMap[Int, File] = new HashMap[Int, File]
 
-  val shuffleClients: HashMap[String, ShuffleOutputClient] = new HashMap[String, ShuffleOutputClient]
+  val shuffleClients: HashMap[String, NIOShuffleOutputClient] = new HashMap[String, NIOShuffleOutputClient]
 
   protected def this() = this(0, null, null, 0, null, null)
 
@@ -153,6 +153,7 @@ private[spark] class ShuffleMapTask(
   }
 
   override def pushData() {
+    val totalSize: Long = 0L
     val stageContext: HashMap[Int, String] = jobContext.stageContexts(0)
     files.foreach {
       case (index, file) => {
@@ -167,7 +168,7 @@ private[spark] class ShuffleMapTask(
           val pathSeparator = System.getProperties.getProperty("path.deparator", "/")
           val targetPath = localDir + pathSeparator + shuffleId +
             pathSeparator + reduceId + pathSeparator + fileName
-          if (false | host.equals(localhost)) {
+          if (false && host.equals(localhost)) {
             val toPath = FileSystems.getDefault.getPath(targetPath)
             val fromPath = FileSystems.getDefault.getPath(file.getCanonicalPath)
             val targetDir = localDir + pathSeparator + shuffleId +
@@ -180,10 +181,10 @@ private[spark] class ShuffleMapTask(
             Files.createSymbolicLink(toPath, fromPath);
           } else {
             val start = System.currentTimeMillis()
-            val client = new ShuffleOutputClient(host, 9026)
+            val client = new NewShuffleOutputClient(host, 9026, file.getCanonicalPath, fileName)
             logInfo("shuffle map task push data, shuffleId:" + shuffleId + ", reduceId:" + reduceId + ", fileName:" +
               fileName)
-            client.sendFile(file.getCanonicalPath, targetPath)
+            client.run()
             logInfo("transfer file from local:" + file.getCanonicalPath + ",to node" + client.getHost + " target path:" +
               targetPath + ", cost:" + (System.currentTimeMillis() - start) + "ms")
           }
