@@ -58,7 +58,6 @@ class TestHiveContext(sc: SparkContext) extends LocalHiveContext(sc) {
 
   // By clearing the port we force Spark to pick a new one.  This allows us to rerun tests
   // without restarting the JVM.
-  System.clearProperty("spark.driver.port")
   System.clearProperty("spark.hostPort")
 
   override lazy val warehousePath = getTempFilePath("sparkHiveWarehouse").getCanonicalPath
@@ -99,15 +98,17 @@ class TestHiveContext(sc: SparkContext) extends LocalHiveContext(sc) {
   val hiveFilesTemp = File.createTempFile("catalystHiveFiles", "")
   hiveFilesTemp.delete()
   hiveFilesTemp.mkdir()
+  hiveFilesTemp.deleteOnExit()
 
-  val inRepoTests = if (System.getProperty("user.dir").endsWith("sql/hive")) {
-    new File("src/test/resources/")
+  val inRepoTests = if (System.getProperty("user.dir").endsWith("sql" + File.separator + "hive")) {
+    new File("src" + File.separator + "test" + File.separator + "resources" + File.separator)
   } else {
-    new File("sql/hive/src/test/resources")
+    new File("sql" + File.separator + "hive" + File.separator + "src" + File.separator + "test" + 
+      File.separator + "resources")
   }
 
   def getHiveFile(path: String): File = {
-    val stripped = path.replaceAll("""\.\.\/""", "")
+    val stripped = path.replaceAll("""\.\.\/""", "").replace('/', File.separatorChar)
     hiveDevHome
       .map(new File(_, stripped))
       .filter(_.exists)

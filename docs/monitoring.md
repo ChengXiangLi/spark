@@ -3,7 +3,7 @@ layout: global
 title: Monitoring and Instrumentation
 ---
 
-There are several ways to monitor Spark applications.
+There are several ways to monitor Spark applications: web UIs, metrics, and external instrumentation.
 
 # Web Interfaces
 
@@ -115,6 +115,19 @@ represents an application's event logs. This creates a web interface at
       Location of the kerberos keytab file for the History Server.
     </td>
   </tr>
+  <tr>
+    <td>spark.history.ui.acls.enable</td>
+    <td>false</td>
+    <td>
+      Specifies whether acls should be checked to authorize users viewing the applications.
+      If enabled, access control checks are made regardless of what the individual application had 
+      set for <code>spark.ui.acls.enable</code> when the application was run. The application owner
+      will always have authorization to view their own application and any users specified via 
+      <code>spark.ui.view.acls</code> when the application was run will also have authorization
+      to view that application. 
+      If disabled, no access control checks are made. 
+    </td>
+  </tr>
 </table>
 
 Note that in all of these UIs, the tables are sortable by clicking their headers,
@@ -143,7 +156,7 @@ Each instance can report to zero or more _sinks_. Sinks are contained in the
 
 * `ConsoleSink`: Logs metrics information to the console.
 * `CSVSink`: Exports metrics data to CSV files at regular intervals.
-* `JmxSink`: Registers metrics for viewing in a JXM console.
+* `JmxSink`: Registers metrics for viewing in a JMX console.
 * `MetricsServlet`: Adds a servlet within the existing Spark UI to serve metrics data as JSON data.
 * `GraphiteSink`: Sends metrics to a Graphite node.
 

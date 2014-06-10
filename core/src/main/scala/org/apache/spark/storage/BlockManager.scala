@@ -46,11 +46,12 @@ private[spark] class BlockManager(
     val master: BlockManagerMaster,
     val defaultSerializer: Serializer,
     maxMemory: Long,
-    val conf: SparkConf,
+    val _conf: SparkConf,
     securityManager: SecurityManager,
     mapOutputTracker: MapOutputTracker)
   extends Logging {
 
+  def conf = _conf
   val shuffleBlockManager = new ShuffleBlockManager(this)
   val diskBlockManager = new DiskBlockManager(shuffleBlockManager,
     conf.get("spark.local.dir",  System.getProperty("java.io.tmpdir")))
@@ -154,7 +155,7 @@ private[spark] class BlockManager(
     BlockManagerWorker.startBlockManagerWorker(this)
     if (!BlockManager.getDisableHeartBeatsForTesting(conf)) {
       heartBeatTask = actorSystem.scheduler.schedule(0.seconds, heartBeatFrequency.milliseconds) {
-        heartBeat()
+        Utils.tryOrExit { heartBeat() }
       }
     }
   }
@@ -771,7 +772,7 @@ private[spark] class BlockManager(
   /**
    * Replicate block to another node.
    */
-  var cachedPeers: Seq[BlockManagerId] = null
+  @volatile var cachedPeers: Seq[BlockManagerId] = null
   private def replicate(blockId: BlockId, data: ByteBuffer, level: StorageLevel) {
     val tLevel = StorageLevel(
       level.useDisk, level.useMemory, level.useOffHeap, level.deserialized, 1)
@@ -1014,8 +1015,26 @@ private[spark] class BlockManager(
       bytes: ByteBuffer,
       serializer: Serializer = defaultSerializer): Iterator[Any] = {
     bytes.rewind()
-    val stream = wrapForCompression(blockId, new ByteBufferInputStream(bytes, true))
-    serializer.newInstance().deserializeStream(stream).asIterator
+
+    def getIterator = {
+      val stream = wrapForCompression(blockId, new ByteBufferInputStream(bytes, true))
+      serializer.newInstance().deserializeStream(stream).asIterator
+    }
+
+    if (blockId.isShuffle) {
+      // Reducer may need to read many local shuffle blocks and will wrap them into Iterators
+      // at the beginning. The wrapping will cost some memory (compression instance
+      // initialization, etc.). Reducer reads shuffle blocks one by one so we could do the
+      // wrapping lazily to save memory.
+      class LazyProxyIterator(f: => Iterator[Any]) extends Iterator[Any] {
+        lazy val proxy = f
+        override def hasNext: Boolean = proxy.hasNext
+        override def next(): Any = proxy.next()
+      }
+      new LazyProxyIterator(getIterator)
+    } else {
+      getIterator
+    }
   }
 
   def stop() {

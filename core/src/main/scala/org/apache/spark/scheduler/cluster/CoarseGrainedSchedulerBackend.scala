@@ -27,19 +27,12 @@ import akka.actor._
 import akka.pattern.ask
 import akka.remote.RemotingLifecycleEvent
 
-import org.apache.spark.{Logging, SparkException, TaskState}
-import org.apache.spark.scheduler.{JobContext, SchedulerBackend, TaskDescription, TaskSchedulerImpl}
-import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
-import org.apache.spark.util.{AkkaUtils, Utils}
-import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.RegisteredExecutor
-import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.RegisterExecutor
-import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.RegisterExecutorFailed
-import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.RemoveExecutor
-import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.KillTask
-import org.apache.spark.scheduler.WorkerOffer
-import org.apache.spark.scheduler.SlaveLost
-import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.LaunchTask
+import org.apache.spark.scheduler.JobContext
 import akka.remote.DisassociatedEvent
+import org.apache.spark.{SparkEnv, Logging, SparkException, TaskState}
+import org.apache.spark.scheduler.{SchedulerBackend, SlaveLost, TaskDescription, TaskSchedulerImpl, WorkerOffer}
+import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
+import org.apache.spark.util.{SerializableBuffer, AkkaUtils, Utils}
 
 /**
  * A scheduler backend that waits for coarse grained executors to connect to it through Akka.
@@ -58,7 +51,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
   val conf = scheduler.sc.conf
   val jobToJobContext = new HashMap[Int, JobContext]
   var hosts = new ListBuffer[String]()
-
+  private val akkaFrameSize = AkkaUtils.maxFrameSizeBytes(conf)
   private val timeout = AkkaUtils.askTimeout(conf)
   class DriverActor(sparkProperties: Seq[(String, String)]) extends Actor {
     private val executorActor = new HashMap[String, ActorRef]
@@ -151,8 +144,26 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
     // Launch tasks returned by a set of resource offers
     def launchTasks(tasks: Seq[Seq[TaskDescription]]) {
       for (task <- tasks.flatten) {
-        freeCores(task.executorId) -= scheduler.CPUS_PER_TASK
-        executorActor(task.executorId) ! LaunchTask(task)
+        val ser = SparkEnv.get.closureSerializer.newInstance()
+        val serializedTask = ser.serialize(task)
+        if (serializedTask.limit >= akkaFrameSize - 1024) {
+          val taskSetId = scheduler.taskIdToTaskSetId(task.taskId)
+          scheduler.activeTaskSets.get(taskSetId).foreach { taskSet =>
+            try {
+              var msg = "Serialized task %s:%d was %d bytes which " +
+                "exceeds spark.akka.frameSize (%d bytes). " +
+                "Consider using broadcast variables for large values."
+              msg = msg.format(task.taskId, task.index, serializedTask.limit, akkaFrameSize)
+              taskSet.abort(msg)
+            } catch {
+              case e: Exception => logError("Exception in error callback", e)
+            }
+          }
+        }
+        else {
+          freeCores(task.executorId) -= scheduler.CPUS_PER_TASK
+          executorActor(task.executorId) ! LaunchTask(new SerializableBuffer(serializedTask))
+        }
       }
     }
 

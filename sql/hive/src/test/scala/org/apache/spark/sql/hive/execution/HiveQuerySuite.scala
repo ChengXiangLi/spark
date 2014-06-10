@@ -18,11 +18,18 @@
 package org.apache.spark.sql.hive.execution
 
 import org.apache.spark.sql.hive.test.TestHive._
+import org.apache.spark.sql.hive.test.TestHive
 
 /**
  * A set of test cases expressed in Hive QL that are not covered by the tests included in the hive distribution.
  */
 class HiveQuerySuite extends HiveComparisonTest {
+
+  createQueryTest("between",
+    "SELECT * FROM src WHERE key Between 1 and 2")
+
+  createQueryTest("div",
+    "SELECT 1 DIV 2, 1 div 2, 1 dIv 2 FROM src LIMIT 1")
 
   test("Query expressed in SQL") {
     assert(sql("SELECT 1").collect() === Array(Seq(1)))
@@ -32,6 +39,9 @@ class HiveQuerySuite extends HiveComparisonTest {
     hql("FROM src SELECT key").collect()
     hiveql("FROM src SELECT key").collect()
   }
+
+  createQueryTest("Constant Folding Optimization for AVG_SUM_COUNT",
+    "SELECT AVG(0), SUM(0), COUNT(null), COUNT(value) FROM src GROUP BY key")
 
   createQueryTest("Simple Average",
     "SELECT AVG(key) FROM src")
@@ -150,4 +160,15 @@ class HiveQuerySuite extends HiveComparisonTest {
     hql("SHOW TABLES").toString
     hql("SELECT * FROM src").toString
   }
+
+  test("SPARK-1704: Explain commands as a SchemaRDD") {
+    hql("CREATE TABLE IF NOT EXISTS src (key INT, value STRING)")
+    val rdd = hql("explain select key, count(value) from src group by key")
+    assert(rdd.collect().size == 1)
+    assert(rdd.toString.contains("ExplainCommand"))
+    assert(rdd.filter(row => row.toString.contains("ExplainCommand")).collect().size == 0,
+      "actual contents of the result should be the plans of the query to be explained")
+    TestHive.reset()
+  }
+
 }

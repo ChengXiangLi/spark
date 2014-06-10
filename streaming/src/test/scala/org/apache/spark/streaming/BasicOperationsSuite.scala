@@ -23,7 +23,7 @@ import org.apache.spark.rdd.{BlockRDD, RDD}
 import org.apache.spark.SparkContext._
 
 import util.ManualClock
-import org.apache.spark.{SparkContext, SparkConf}
+import org.apache.spark.{SparkException, SparkConf}
 import org.apache.spark.streaming.dstream.{WindowedDStream, DStream}
 import scala.collection.mutable.{SynchronizedBuffer, ArrayBuffer}
 import scala.reflect.ClassTag
@@ -92,9 +92,9 @@ class BasicOperationsSuite extends TestSuiteBase {
     assert(second.size === 5)
     assert(third.size === 5)
 
-    assert(first.flatten.toSet === (1 to 100).toSet)
-    assert(second.flatten.toSet === (101 to 200).toSet)
-    assert(third.flatten.toSet === (201 to 300).toSet)
+    assert(first.flatten.toSet.equals((1 to 100).toSet) )
+    assert(second.flatten.toSet.equals((101 to 200).toSet))
+    assert(third.flatten.toSet.equals((201 to 300).toSet))
   }
 
   test("repartition (fewer partitions)") {
@@ -111,9 +111,9 @@ class BasicOperationsSuite extends TestSuiteBase {
     assert(second.size === 2)
     assert(third.size === 2)
 
-    assert(first.flatten.toSet === (1 to 100).toSet)
-    assert(second.flatten.toSet === (101 to 200).toSet)
-    assert(third.flatten.toSet === (201 to 300).toSet)
+    assert(first.flatten.toSet.equals((1 to 100).toSet))
+    assert(second.flatten.toSet.equals( (101 to 200).toSet))
+    assert(third.flatten.toSet.equals((201 to 300).toSet))
   }
 
   test("groupByKey") {
@@ -396,6 +396,16 @@ class BasicOperationsSuite extends TestSuiteBase {
     assert(getInputFromSlice(2000, 4000) == Set(2, 3, 4))
     ssc.stop()
     Thread.sleep(1000)
+  }
+
+  test("slice - has not been initialized") {
+    val ssc = new StreamingContext(conf, Seconds(1))
+    val input = Seq(Seq(1), Seq(2), Seq(3), Seq(4))
+    val stream = new TestInputStream[Int](ssc, input, 2)
+    val thrown = intercept[SparkException] {
+      stream.slice(new Time(0), new Time(1000))
+    }
+    assert(thrown.getMessage.contains("has not been initialized"))
   }
 
   val cleanupTestInput = (0 until 10).map(x => Seq(x, x + 1)).toSeq

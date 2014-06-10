@@ -23,17 +23,16 @@ import scala.util.Random
 import scala.util.Sorting
 import scala.util.hashing.byteswap32
 
-import com.esotericsoftware.kryo.Kryo
 import org.jblas.{DoubleMatrix, SimpleBlas, Solve}
 
 import org.apache.spark.annotation.Experimental
 import org.apache.spark.broadcast.Broadcast
-import org.apache.spark.{Logging, HashPartitioner, Partitioner, SparkContext, SparkConf}
+import org.apache.spark.{Logging, HashPartitioner, Partitioner}
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.rdd.RDD
-import org.apache.spark.serializer.KryoRegistrator
 import org.apache.spark.SparkContext._
 import org.apache.spark.util.Utils
+import org.apache.spark.mllib.optimization.NNLS
 
 /**
  * Out-link information for a user or product block. This includes the original user/product IDs
@@ -158,6 +157,18 @@ class ALS private (
     this
   }
 
+  /** If true, do alternating nonnegative least squares. */
+  private var nonnegative = false
+
+  /**
+   * Set whether the least-squares problems solved at each iteration should have
+   * nonnegativity constraints.
+   */
+  def setNonnegative(b: Boolean): ALS = {
+    this.nonnegative = b
+    this
+  }
+
   /**
    * Run ALS with the configured parameters on an input RDD of (user, product, rating) triples.
    * Returns a MatrixFactorizationModel with feature vectors for each user and product.
@@ -190,6 +201,10 @@ class ALS private (
     val (userInLinks, userOutLinks) = makeLinkRDDs(numBlocks, ratingsByUserBlock, partitioner)
     val (productInLinks, productOutLinks) =
         makeLinkRDDs(numBlocks, ratingsByProductBlock, partitioner)
+    userInLinks.setName("userInLinks")
+    userOutLinks.setName("userOutLinks")
+    productInLinks.setName("productInLinks")
+    productOutLinks.setName("productOutLinks")
 
     // Initialize user and product factors randomly, but use a deterministic seed for each
     // partition so that fault recovery works
@@ -214,14 +229,14 @@ class ALS private (
         // perform ALS update
         logInfo("Re-computing I given U (Iteration %d/%d)".format(iter, iterations))
         // Persist users because it will be called twice.
-        users.persist()
+        users.setName(s"users-$iter").persist()
         val YtY = Some(sc.broadcast(computeYtY(users)))
         val previousProducts = products
         products = updateFeatures(users, userOutLinks, productInLinks, partitioner, rank, lambda,
           alpha, YtY)
         previousProducts.unpersist()
         logInfo("Re-computing U given I (Iteration %d/%d)".format(iter, iterations))
-        products.persist()
+        products.setName(s"products-$iter").persist()
         val XtX = Some(sc.broadcast(computeYtY(products)))
         val previousUsers = users
         users = updateFeatures(products, productOutLinks, userInLinks, partitioner, rank, lambda,
@@ -234,22 +249,24 @@ class ALS private (
         logInfo("Re-computing I given U (Iteration %d/%d)".format(iter, iterations))
         products = updateFeatures(users, userOutLinks, productInLinks, partitioner, rank, lambda,
           alpha, YtY = None)
+        products.setName(s"products-$iter")
         logInfo("Re-computing U given I (Iteration %d/%d)".format(iter, iterations))
         users = updateFeatures(products, productOutLinks, userInLinks, partitioner, rank, lambda,
           alpha, YtY = None)
+        users.setName(s"users-$iter")
       }
     }
 
     // The last `products` will be used twice. One to generate the last `users` and the other to
     // generate `productsOut`. So we cache it for better performance.
-    products.persist()
+    products.setName("products").persist()
 
     // Flatten and cache the two final RDDs to un-block them
     val usersOut = unblockFactors(users, userOutLinks)
     val productsOut = unblockFactors(products, productOutLinks)
 
-    usersOut.persist()
-    productsOut.persist()
+    usersOut.setName("usersOut").persist()
+    productsOut.setName("productsOut").persist()
 
     // Materialize usersOut and productsOut.
     usersOut.count()
@@ -474,13 +491,15 @@ class ALS private (
     // Compute the XtX and Xy values for each user by adding products it rated in each product
     // block
     for (productBlock <- 0 until numBlocks) {
-      for (p <- 0 until blockFactors(productBlock).length) {
+      var p = 0
+      while (p < blockFactors(productBlock).length) {
         val x = wrapDoubleArray(blockFactors(productBlock)(p))
         tempXtX.fill(0.0)
         dspr(1.0, x, tempXtX)
         val (us, rs) = inLinkBlock.ratingsForBlock(productBlock)(p)
-        for (i <- 0 until us.length) {
-          if (implicitPrefs) {
+        if (implicitPrefs) {
+          var i = 0
+          while (i < us.length) {
             // Extension to the original paper to handle rs(i) < 0. confidence is a function
             // of |rs(i)| instead so that it is never negative:
             val confidence = 1 + alpha * abs(rs(i))
@@ -491,26 +510,51 @@ class ALS private (
             if (rs(i) > 0) {
               SimpleBlas.axpy(confidence, x, userXy(us(i)))
             }
-          } else {
+            i += 1
+          }
+        } else {
+          var i = 0
+          while (i < us.length) {
             userXtX(us(i)).addi(tempXtX)
             SimpleBlas.axpy(rs(i), x, userXy(us(i)))
+            i += 1
           }
         }
+        p += 1
       }
     }
+
+    val ws = if (nonnegative) NNLS.createWorkspace(rank) else null
 
     // Solve the least-squares problem for each user and return the new feature vectors
     Array.range(0, numUsers).map { index =>
       // Compute the full XtX matrix from the lower-triangular part we got above
       fillFullMatrix(userXtX(index), fullXtX)
       // Add regularization
-      (0 until rank).foreach(i => fullXtX.data(i*rank + i) += lambda)
+      var i = 0
+      while (i < rank) {
+        fullXtX.data(i * rank + i) += lambda
+        i += 1
+      }
       // Solve the resulting matrix, which is symmetric and positive-definite
       if (implicitPrefs) {
-        Solve.solvePositive(fullXtX.addi(YtY.get.value), userXy(index)).data
+        solveLeastSquares(fullXtX.addi(YtY.get.value), userXy(index), ws)
       } else {
-        Solve.solvePositive(fullXtX, userXy(index)).data
+        solveLeastSquares(fullXtX, userXy(index), ws)
       }
+    }
+  }
+
+  /**
+   * Given A^T A and A^T b, find the x minimising ||Ax - b||_2, possibly subject
+   * to nonnegativity constraints if `nonnegative` is true.
+   */
+  def solveLeastSquares(ata: DoubleMatrix, atb: DoubleMatrix,
+      ws: NNLS.Workspace): Array[Double] = {
+    if (!nonnegative) {
+      Solve.solvePositive(ata, atb).data
+    } else {
+      NNLS.solve(ata, atb, ws)
     }
   }
 
@@ -540,7 +584,6 @@ class ALS private (
  * Top-level methods for calling Alternating Least Squares (ALS) matrix factorization.
  */
 object ALS {
-
   /**
    * Train a matrix factorization model given an RDD of ratings given by users to some products,
    * in the form of (userID, productID, rating) pairs. We approximate the ratings matrix as the
@@ -706,46 +749,5 @@ object ALS {
   def trainImplicit(ratings: RDD[Rating], rank: Int, iterations: Int)
     : MatrixFactorizationModel = {
     trainImplicit(ratings, rank, iterations, 0.01, -1, 1.0)
-  }
-
-  private class ALSRegistrator extends KryoRegistrator {
-    override def registerClasses(kryo: Kryo) {
-      kryo.register(classOf[Rating])
-    }
-  }
-
-  def main(args: Array[String]) {
-    if (args.length < 5 || args.length > 9) {
-      println("Usage: ALS <master> <ratings_file> <rank> <iterations> <output_dir> " +
-        "[<lambda>] [<implicitPrefs>] [<alpha>] [<blocks>]")
-      System.exit(1)
-    }
-    val (master, ratingsFile, rank, iters, outputDir) =
-      (args(0), args(1), args(2).toInt, args(3).toInt, args(4))
-    val lambda = if (args.length >= 6) args(5).toDouble else 0.01
-    val implicitPrefs = if (args.length >= 7) args(6).toBoolean else false
-    val alpha = if (args.length >= 8) args(7).toDouble else 1
-    val blocks = if (args.length == 9) args(8).toInt else -1
-    val conf = new SparkConf()
-      .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-      .set("spark.kryo.registrator",  classOf[ALSRegistrator].getName)
-      .set("spark.kryo.referenceTracking", "false")
-      .set("spark.kryoserializer.buffer.mb", "8")
-      .set("spark.locality.wait", "10000")
-    val sc = new SparkContext(master, "ALS", conf)
-
-    val ratings = sc.textFile(ratingsFile).map { line =>
-      val fields = line.split(',')
-      Rating(fields(0).toInt, fields(1).toInt, fields(2).toDouble)
-    }
-    val model = new ALS(rank = rank, iterations = iters, lambda = lambda,
-      numBlocks = blocks, implicitPrefs = implicitPrefs, alpha = alpha).run(ratings)
-
-    model.userFeatures.map{ case (id, vec) => id + "," + vec.mkString(" ") }
-                      .saveAsTextFile(outputDir + "/userFeatures")
-    model.productFeatures.map{ case (id, vec) => id + "," + vec.mkString(" ") }
-                         .saveAsTextFile(outputDir + "/productFeatures")
-    println("Final user/product features written to " + outputDir)
-    sc.stop()
   }
 }
