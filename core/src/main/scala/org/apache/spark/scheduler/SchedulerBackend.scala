@@ -33,5 +33,5 @@ private[spark] trait SchedulerBackend {
 
   def addStageContext(jobId: Int, stage: Stage) {}
 
-  def getJobContext(jobId: Int): JobContext = {null}
+  def getJobContext(jobId: Int): SparkJobContext = {null}
 }

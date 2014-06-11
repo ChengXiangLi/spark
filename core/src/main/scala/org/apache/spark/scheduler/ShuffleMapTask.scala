@@ -105,7 +105,7 @@ private[spark] class ShuffleMapTask(
                                      var dep: ShuffleDependency[_, _],
                                      _partitionId: Int,
                                      @transient private var locs: Seq[TaskLocation],
-                                     var jobContext: JobContext)
+                                     var jobContext: SparkJobContext)
   extends Task[MapStatus](stageId, _partitionId)
   with Externalizable
   with Logging {
@@ -113,6 +113,7 @@ private[spark] class ShuffleMapTask(
   val files: HashMap[Int, File] = new HashMap[Int, File]
 
   val shuffleClients: HashMap[String, NIOShuffleOutputClient] = new HashMap[String, NIOShuffleOutputClient]
+  var actualStageId: Int = _
 
   protected def this() = this(0, null, null, 0, null, null)
 
@@ -138,6 +139,7 @@ private[spark] class ShuffleMapTask(
 
   override def readExternal(in: ObjectInput) {
     val stageId = in.readInt()
+    actualStageId = stageId
     val numBytes = in.readInt()
     val bytes = new Array[Byte](numBytes)
     in.readFully(bytes)
@@ -147,12 +149,12 @@ private[spark] class ShuffleMapTask(
     partitionId = in.readInt()
     epoch = in.readLong()
     split = in.readObject().asInstanceOf[Partition]
-    jobContext = in.readObject().asInstanceOf[JobContext]
+    jobContext = in.readObject().asInstanceOf[SparkJobContext]
   }
 
   override def pushData() {
     val totalSize: Long = 0L
-    val stageContext: HashMap[Int, String] = jobContext.stageContexts(0)
+    val stageContext: HashMap[Int, String] = jobContext.stageContexts(actualStageId)
     files.foreach {
       case (index, file) => {
         if (file.exists()) {

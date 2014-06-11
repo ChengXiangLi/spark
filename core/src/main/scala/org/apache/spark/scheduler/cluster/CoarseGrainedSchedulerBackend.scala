@@ -27,7 +27,7 @@ import akka.actor._
 import akka.pattern.ask
 import akka.remote.RemotingLifecycleEvent
 
-import org.apache.spark.scheduler.JobContext
+import org.apache.spark.scheduler.SparkJobContext
 import akka.remote.DisassociatedEvent
 import org.apache.spark.{SparkEnv, Logging, SparkException, TaskState}
 import org.apache.spark.scheduler.{SchedulerBackend, SlaveLost, TaskDescription, TaskSchedulerImpl, WorkerOffer}
@@ -49,7 +49,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
   // Use an atomic variable to track total number of cores in the cluster for simplicity and speed
   var totalCoreCount = new AtomicInteger(0)
   val conf = scheduler.sc.conf
-  val jobToJobContext = new HashMap[Int, JobContext]
+  val jobToJobContext = new HashMap[Int, SparkJobContext]
   var hosts = new ListBuffer[String]()
   private val akkaFrameSize = AkkaUtils.maxFrameSizeBytes(conf)
   private val timeout = AkkaUtils.askTimeout(conf)
@@ -249,11 +249,11 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
   }
 
   override def addStageContext(jobId: Int, stage: org.apache.spark.scheduler.Stage) {
-    val jobContext = jobToJobContext.getOrElseUpdate(jobId, new JobContext(jobId))
+    val jobContext = jobToJobContext.getOrElseUpdate(jobId, new SparkJobContext(jobId))
     addStageContext(jobContext, stage)
   }
 
-  def addStageContext(jobContext: JobContext, stage: org.apache.spark.scheduler.Stage) {
+  def addStageContext(jobContext: SparkJobContext, stage: org.apache.spark.scheduler.Stage) {
     val stageContext = new HashMap[Int, String]
     stage.rdd.partitions.foreach(partition => {
       stageContext(partition.index) = hosts(partition.index % hosts.size)
@@ -261,7 +261,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
     jobContext.stageContexts.put(stage.id, stageContext)
   }
 
-  override def getJobContext(jobId: Int): JobContext = {
+  override def getJobContext(jobId: Int): SparkJobContext = {
     jobToJobContext(jobId)
   }
 }

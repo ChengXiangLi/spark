@@ -745,7 +745,7 @@ class DAGScheduler(
     if (stage.isShuffleMap) {
       for (p <- 0 until stage.numPartitions if stage.outputLocs(p) == Nil) {
         var locs:Seq[TaskLocation] = null
-        if (stage.parents.size == 0) {
+        if (stage.parents.size == 0 || !getCacheLocs(stage.rdd)(p).isEmpty) {
           locs = getPreferredLocs(stage.rdd, p)
         } else
           locs = getPreferredLocs(p, jobId, stage.parents.head.id)
@@ -757,7 +757,7 @@ class DAGScheduler(
       for (id <- 0 until job.numPartitions if !job.finished(id)) {
         val partition = job.partitions(id)
         var locs:Seq[TaskLocation] = null
-        if (stage.parents.size == 0) {
+        if (stage.parents.size == 0 || !getCacheLocs(stage.rdd)(partition).isEmpty) {
           locs = getPreferredLocs(stage.rdd, partition)
         } else
           locs = getPreferredLocs(stage.rdd.partitions(partition).index, jobId, stage.id)
@@ -1176,6 +1176,7 @@ private[scheduler] class DAGSchedulerActorSupervisor(dagScheduler: DAGScheduler)
       case x: Exception =>
         logError("eventProcesserActor failed due to the error %s; shutting down SparkContext"
           .format(x.getMessage))
+        x.printStackTrace()
         dagScheduler.doCancelAllJobs()
         dagScheduler.sc.stop()
         Stop

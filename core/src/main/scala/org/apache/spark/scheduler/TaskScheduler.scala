@@ -57,5 +57,5 @@ private[spark] trait TaskScheduler {
 
   def addStageContext(jobId: Int, stage: Stage) {}
 
-  def getJobContext(jobId: Int): JobContext = {null}
+  def getJobContext(jobId: Int): SparkJobContext = {null}
 }
