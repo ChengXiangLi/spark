@@ -22,7 +22,7 @@ import scala.language.existentials
 import java.io._
 import java.util.zip.{GZIPInputStream, GZIPOutputStream}
 
-import scala.collection.mutable.HashMap
+import scala.collection.mutable.{ListBuffer, HashMap}
 import scala.concurrent.ExecutionContext.Implicits.global
 
 import org.apache.spark._
@@ -30,7 +30,6 @@ import org.apache.spark.executor.{ExecutorBackend, ShuffleWriteMetrics}
 import org.apache.spark.rdd.{RDD, RDDCheckpointData}
 import org.apache.spark.serializer.Serializer
 import org.apache.spark.storage._
-import org.apache.spark.shuffle.NIOShuffleOutputClient
 import java.util.concurrent.atomic.AtomicInteger
 import java.nio.ByteBuffer
 
@@ -112,9 +111,8 @@ private[spark] class ShuffleMapTask(
   with Externalizable
   with Logging {
 
-  val shuffleBlocks: HashMap[Int, BlockId] = new HashMap[Int, BlockId]
+  val shuffleBlocks = new ListBuffer[(Int, BlockId)]()
 
-  val shuffleClients: HashMap[String, NIOShuffleOutputClient] = new HashMap[String, NIOShuffleOutputClient]
   var actualStageId: Int = _
 
   protected def this() = this(0, null, null, 0, null, null)
@@ -222,7 +220,10 @@ private[spark] class ShuffleMapTask(
 
       shuffle.writers.zipWithIndex.foreach {
         case (writer, index) => {
-          shuffleBlocks(index) = writer.asInstanceOf[DiskBlockObjectWriter].blockId
+          val objWriter = writer.asInstanceOf[DiskBlockObjectWriter]
+          if (objWriter.file.exists()) {
+            shuffleBlocks.append((index, objWriter.blockId))
+          }
         }
       }
 

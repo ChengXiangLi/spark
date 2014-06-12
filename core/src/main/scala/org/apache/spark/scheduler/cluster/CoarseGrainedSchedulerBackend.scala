@@ -92,7 +92,6 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
         }
 
       case StatusUpdate(executorId, taskId, state, data) =>
-        logInfo("got map status update, executorId:" + executorId + ", taskId:" + taskId + ", task state:" + state)
         scheduler.statusUpdate(taskId, state, data.value)
         if (TaskState.isFinished(state) && !TaskState.PUSHED.equals(state)) {
           if (executorActor.contains(executorId)) {
