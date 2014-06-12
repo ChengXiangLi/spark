@@ -333,6 +333,10 @@ private[spark] class BlockManager(
       sys.error("Block " + blockId + " not found on disk, though it should be"))
   }
 
+  def getLocalFromMemory(blockId: BlockId, serializer: Serializer): Option[Iterator[Any]] = {
+    memoryStore.getValues(blockId).orElse(None)
+  }
+
   /**
    * Get block from local block manager.
    */
@@ -806,7 +810,8 @@ private[spark] class BlockManager(
         data.rewind()
         logDebug("Try to replicate BlockId " + blockId + " once; The size of the data is "
           + data.limit() + " Bytes. To node: " + blockManagerId)
-        val message: Future[Option[Message]] = BlockManagerWorker.asyncPutBlock(PutBlock(blockId, data, StorageLevel.DISK_ONLY),
+        val message: Future[Option[Message]] = BlockManagerWorker.asyncPutBlock(PutBlock(blockId,
+          data, StorageLevel.DISK_ONLY),
           new ConnectionManagerId(blockManagerId.host, blockManagerId.port))
         logDebug("Replicated BlockId " + blockId + " once used " +
           (System.nanoTime - start) / 1e6 + " s; The size of the data is " +
