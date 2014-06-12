@@ -231,11 +231,11 @@ private[spark] class Executor(
 
         execBackend.statusUpdate(taskId, TaskState.FINISHED, serializedResult)
         logInfo("Finished task ID " + taskId)
-        val start = System.currentTimeMillis();
-        task.pushData()
-        execBackend.statusUpdate(taskId, TaskState.PUSHED, serializedResult)
-        logInfo("Task[" + taskId + "] outputs have been pushed to reduce side. totally cost:" +
-          (System.currentTimeMillis() - start) + "ms.")
+        if (task.isInstanceOf[ShuffleMapTask]) {
+          task.pushData(execBackend, serializedResult)
+        } else {
+          execBackend.statusUpdate(taskId, TaskState.PUSHED, serializedResult)
+        }
       } catch {
         case ffe: FetchFailedException => {
           val reason = ffe.toTaskEndReason

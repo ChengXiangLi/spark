@@ -110,6 +110,8 @@ private[storage] object BlockManagerMessages {
 
   case class GetPeers(blockManagerId: BlockManagerId, size: Int) extends ToBlockManagerMaster
 
+  case class GetConnectionId(executorId: String) extends ToBlockManagerMaster
+
   case class RemoveExecutor(execId: String) extends ToBlockManagerMaster
 
   case object StopBlockManagerMaster extends ToBlockManagerMaster

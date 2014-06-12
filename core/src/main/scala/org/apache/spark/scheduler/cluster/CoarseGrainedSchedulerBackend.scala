@@ -27,7 +27,7 @@ import akka.actor._
 import akka.pattern.ask
 import akka.remote.RemotingLifecycleEvent
 
-import org.apache.spark.scheduler.SparkJobContext
+import org.apache.spark.scheduler.SparkOutputContext
 import akka.remote.DisassociatedEvent
 import org.apache.spark.{SparkEnv, Logging, SparkException, TaskState}
 import org.apache.spark.scheduler.{SchedulerBackend, SlaveLost, TaskDescription, TaskSchedulerImpl, WorkerOffer}
@@ -49,8 +49,8 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
   // Use an atomic variable to track total number of cores in the cluster for simplicity and speed
   var totalCoreCount = new AtomicInteger(0)
   val conf = scheduler.sc.conf
-  val jobToJobContext = new HashMap[Int, SparkJobContext]
-  var hosts = new ListBuffer[String]()
+  val jobToJobContext = new HashMap[Int, SparkOutputContext]
+  var executorIds = new ListBuffer[(String, String)]()
   private val akkaFrameSize = AkkaUtils.maxFrameSizeBytes(conf)
   private val timeout = AkkaUtils.askTimeout(conf)
   class DriverActor(sparkProperties: Seq[(String, String)]) extends Actor {
@@ -80,8 +80,9 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
           logInfo("Registered executor: " + sender + " with ID " + executorId)
           sender ! RegisteredExecutor(sparkProperties)
           executorActor(executorId) = sender
-          executorHost(executorId) = Utils.parseHostPort(hostPort)._1
-          hosts += Utils.parseHostPort(hostPort)._1
+          val host = Utils.parseHostPort(hostPort)._1
+          executorHost(executorId) = host
+          executorIds.append((host, executorId))
           totalCores(executorId) = cores
           freeCores(executorId) = cores
           executorAddress(executorId) = sender.path.address
@@ -91,6 +92,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
         }
 
       case StatusUpdate(executorId, taskId, state, data) =>
+        logInfo("got map status update, executorId:" + executorId + ", taskId:" + taskId + ", task state:" + state)
         scheduler.statusUpdate(taskId, state, data.value)
         if (TaskState.isFinished(state) && !TaskState.PUSHED.equals(state)) {
           if (executorActor.contains(executorId)) {
@@ -248,20 +250,22 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
     }
   }
 
-  override def addStageContext(jobId: Int, stage: org.apache.spark.scheduler.Stage) {
-    val jobContext = jobToJobContext.getOrElseUpdate(jobId, new SparkJobContext(jobId))
-    addStageContext(jobContext, stage)
+  override def addOutputMapping(jobId: Int, stage: org.apache.spark.scheduler.Stage) {
+    val jobContext = jobToJobContext.getOrElseUpdate(jobId, new SparkOutputContext(jobId))
+    addStageOutputMapping(jobContext, stage)
   }
 
-  def addStageContext(jobContext: SparkJobContext, stage: org.apache.spark.scheduler.Stage) {
-    val stageContext = new HashMap[Int, String]
+  def addStageOutputMapping(jobContext: SparkOutputContext, stage: org.apache.spark.scheduler.Stage) {
+    val stageContext = new HashMap[Int, (String, String)]
     stage.rdd.partitions.foreach(partition => {
-      stageContext(partition.index) = hosts(partition.index % hosts.size)
+      stageContext(partition.index) = executorIds(partition.index % executorIds.size)
     })
-    jobContext.stageContexts.put(stage.id, stageContext)
+    stage.parents.foreach(parent => {
+      jobContext.stageOutputMapping.put(parent.id, stageContext)
+    })
   }
 
-  override def getJobContext(jobId: Int): SparkJobContext = {
+  override def getOutputContext(jobId: Int): SparkOutputContext = {
     jobToJobContext(jobId)
   }
 }

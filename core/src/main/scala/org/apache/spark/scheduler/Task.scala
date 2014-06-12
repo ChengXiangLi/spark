@@ -23,7 +23,7 @@ import java.nio.ByteBuffer
 import scala.collection.mutable.HashMap
 
 import org.apache.spark.TaskContext
-import org.apache.spark.executor.TaskMetrics
+import org.apache.spark.executor.{ExecutorBackend, TaskMetrics}
 import org.apache.spark.serializer.SerializerInstance
 import org.apache.spark.util.ByteBufferInputStream
 
@@ -55,7 +55,7 @@ private[spark] abstract class Task[T](val stageId: Int, var partitionId: Int) ex
 
   def preferredLocations: Seq[TaskLocation] = Nil
 
-  def pushData(){}
+  def pushData(executorbackend: ExecutorBackend, data: ByteBuffer){}
 
   // Map output tracker epoch. Will be set by TaskScheduler.
   var epoch: Long = -1

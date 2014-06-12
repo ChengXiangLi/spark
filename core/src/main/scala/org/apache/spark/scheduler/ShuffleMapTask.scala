@@ -23,15 +23,17 @@ import java.io._
 import java.util.zip.{GZIPInputStream, GZIPOutputStream}
 
 import scala.collection.mutable.HashMap
+import scala.concurrent.ExecutionContext.Implicits.global
 
 import org.apache.spark._
-import org.apache.spark.executor.ShuffleWriteMetrics
+import org.apache.spark.executor.{ExecutorBackend, ShuffleWriteMetrics}
 import org.apache.spark.rdd.{RDD, RDDCheckpointData}
 import org.apache.spark.serializer.Serializer
 import org.apache.spark.storage._
-import org.apache.spark.shuffle.{NewShuffleOutputClient, NIOShuffleOutputClient}
-import java.net.InetAddress
-import java.nio.file.{FileSystems, Files}
+import org.apache.spark.shuffle.NIOShuffleOutputClient
+import java.util.concurrent.atomic.AtomicInteger
+import java.nio.ByteBuffer
+
 
 private[spark] object ShuffleMapTask {
 
@@ -59,12 +61,12 @@ private[spark] object ShuffleMapTask {
     }
   }
 
-  def deserializeInfo(stageId: Int, bytes: Array[Byte]): (RDD[_], ShuffleDependency[_,_]) = {
+  def deserializeInfo(stageId: Int, bytes: Array[Byte]): (RDD[_], ShuffleDependency[_, _]) = {
     val in = new GZIPInputStream(new ByteArrayInputStream(bytes))
     val ser = SparkEnv.get.closureSerializer.newInstance()
     val objIn = ser.deserializeStream(in)
     val rdd = objIn.readObject().asInstanceOf[RDD[_]]
-    val dep = objIn.readObject().asInstanceOf[ShuffleDependency[_,_]]
+    val dep = objIn.readObject().asInstanceOf[ShuffleDependency[_, _]]
     (rdd, dep)
   }
 
@@ -105,12 +107,12 @@ private[spark] class ShuffleMapTask(
                                      var dep: ShuffleDependency[_, _],
                                      _partitionId: Int,
                                      @transient private var locs: Seq[TaskLocation],
-                                     var jobContext: SparkJobContext)
+                                     var jobContext: SparkOutputContext)
   extends Task[MapStatus](stageId, _partitionId)
   with Externalizable
   with Logging {
 
-  val files: HashMap[Int, File] = new HashMap[Int, File]
+  val shuffleBlocks: HashMap[Int, BlockId] = new HashMap[Int, BlockId]
 
   val shuffleClients: HashMap[String, NIOShuffleOutputClient] = new HashMap[String, NIOShuffleOutputClient]
   var actualStageId: Int = _
@@ -149,45 +151,28 @@ private[spark] class ShuffleMapTask(
     partitionId = in.readInt()
     epoch = in.readLong()
     split = in.readObject().asInstanceOf[Partition]
-    jobContext = in.readObject().asInstanceOf[SparkJobContext]
+    jobContext = in.readObject().asInstanceOf[SparkOutputContext]
   }
 
-  override def pushData() {
-    val totalSize: Long = 0L
-    val stageContext: HashMap[Int, String] = jobContext.stageContexts(actualStageId)
-    files.foreach {
-      case (index, file) => {
-        if (file.exists()) {
-          val host = stageContext(index)
-          val localhost = InetAddress.getLocalHost.getHostName
-          logInfo("push data source host:" + localhost + ", target host:" + host)
-          val fileName = file.getName
-          val reduceId = getReduceIdByShuffleFileName(fileName)
-          val localDir = SparkEnv.get.conf.get("spark.local.dir", System.getProperty("java.io.tmpdir"))
-          val shuffleId = getShuffleIdByShuffleFilename(fileName)
-          val pathSeparator = System.getProperties.getProperty("path.deparator", "/")
-          val targetPath = localDir + pathSeparator + shuffleId +
-            pathSeparator + reduceId + pathSeparator + fileName
-          if (false && host.equals(localhost)) {
-            val toPath = FileSystems.getDefault.getPath(targetPath)
-            val fromPath = FileSystems.getDefault.getPath(file.getCanonicalPath)
-            val targetDir = localDir + pathSeparator + shuffleId +
-              pathSeparator + reduceId
-            val targetDirFolder = new File(targetDir)
-            if (!targetDirFolder.exists()) {
-              targetDirFolder.mkdirs()
+  override def pushData(execBackend: ExecutorBackend, data: ByteBuffer) {
+    val finishedCount: AtomicInteger = new AtomicInteger(0);
+    val stageContext: HashMap[Int, (String, String)] = jobContext.stageOutputMapping(actualStageId)
+    val blockManager = SparkEnv.get.blockManager
+    val start = System.currentTimeMillis();
+    shuffleBlocks.map {
+      case (index, blockId) => {
+        val targetExecutorId = stageContext(index)._2
+        val future = blockManager.copyShuffleBlock(blockId, targetExecutorId)
+        future.onSuccess {
+          case Some(message) =>
+            val currentFinished = finishedCount.incrementAndGet()
+            if (currentFinished == shuffleBlocks.size) {
+              execBackend.statusUpdate(context.attemptId, TaskState.PUSHED, data)
+              logInfo("Task[" + context.attemptId + "] outputs have been pushed to reduce side. totally cost:" +
+                (System.currentTimeMillis() - start) + "ms.")
             }
-            logInfo("try to create link:" + toPath + " from source:" + fromPath)
-            Files.createSymbolicLink(toPath, fromPath);
-          } else {
-            val start = System.currentTimeMillis()
-            val client = new NewShuffleOutputClient(host, 9026, file.getCanonicalPath, fileName)
-            logInfo("shuffle map task push data, shuffleId:" + shuffleId + ", reduceId:" + reduceId + ", fileName:" +
-              fileName)
-            client.run()
-            logInfo("transfer file from local:" + file.getCanonicalPath + ",to node" + client.getHost + " target path:" +
-              targetPath + ", cost:" + (System.currentTimeMillis() - start) + "ms")
-          }
+          case None =>
+            throw new SparkException("Failed to copy shuffle block:" + blockId + " to target:" + targetExecutorId)
         }
       }
     }
@@ -237,8 +222,7 @@ private[spark] class ShuffleMapTask(
 
       shuffle.writers.zipWithIndex.foreach {
         case (writer, index) => {
-          val file = writer.asInstanceOf[DiskBlockObjectWriter].file
-          files(index) = file
+          shuffleBlocks(index) = writer.asInstanceOf[DiskBlockObjectWriter].blockId
         }
       }
 

@@ -22,6 +22,7 @@ import java.nio.ByteBuffer
 import org.apache.spark.Logging
 import org.apache.spark.network._
 import org.apache.spark.util.Utils
+import scala.concurrent.Future
 
 /**
  * A network interface for BlockManager. Each slave should have one
@@ -112,6 +113,16 @@ private[spark] object BlockManagerWorker extends Logging {
     val resultMessage = connectionManager.sendMessageReliablySync(
         toConnManagerId, blockMessageArray.toBufferMessage)
     resultMessage.isDefined
+  }
+
+  def asyncPutBlock(msg: PutBlock, toConnManagerId: ConnectionManagerId): Future[Option[Message]] = {
+    val blockManager = blockManagerWorker.blockManager
+    val connectionManager = blockManager.connectionManager
+    val blockMessage = BlockMessage.fromPutBlock(msg)
+    val blockMessageArray = new BlockMessageArray(blockMessage)
+    val resultMessage = connectionManager.sendMessageReliably(
+      toConnManagerId, blockMessageArray.toBufferMessage)
+    resultMessage
   }
 
   def syncGetBlock(msg: GetBlock, toConnManagerId: ConnectionManagerId): ByteBuffer = {

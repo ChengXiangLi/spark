@@ -89,6 +89,9 @@ class BlockManagerMasterActor(val isLocal: Boolean, conf: SparkConf, listenerBus
     case GetPeers(blockManagerId, size) =>
       sender ! getPeers(blockManagerId, size)
 
+    case GetConnectionId(executorId) =>
+      sender ! getConnectionId(executorId)
+
     case GetMemoryStatus =>
       sender ! memoryStatus
 
@@ -409,6 +412,10 @@ class BlockManagerMasterActor(val isLocal: Boolean, conf: SparkConf, listenerBus
 
     // Note that this logic will select the same node multiple times if there aren't enough peers
     Array.tabulate[BlockManagerId](size) { i => peers((selfIndex + i + 1) % peers.length) }.toSeq
+  }
+
+  private def getConnectionId(executorId: String): BlockManagerId = {
+    return blockManagerIdByExecutor(executorId)
   }
 }
 

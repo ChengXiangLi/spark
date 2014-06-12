@@ -708,7 +708,9 @@ class DAGScheduler(
   /** Submits stage, but first recursively submits any missing parents. */
   private def submitStage(stage: Stage) {
     val jobId = activeJobForStage(stage)
-    addStageContext(jobId.get, stage)
+    if (!stage.parents.isEmpty) {
+      addOutputMapping(jobId.get, stage)
+    }
     if (jobId.isDefined) {
       logDebug("submitStage(" + stage + ")")
       if (!waitingStages(stage) && !runningStages(stage) && !failedStages(stage)) {
@@ -730,8 +732,8 @@ class DAGScheduler(
     }
   }
 
-  private def addStageContext(jobId: Int, stage: Stage) {
-    taskScheduler.addStageContext(jobId, stage)
+  private def addOutputMapping(jobId: Int, stage: Stage) {
+    taskScheduler.addOutputMapping(jobId, stage)
   }
 
 
@@ -748,7 +750,7 @@ class DAGScheduler(
         if (stage.parents.size == 0 || !getCacheLocs(stage.rdd)(p).isEmpty) {
           locs = getPreferredLocs(stage.rdd, p)
         } else
-          locs = getPreferredLocs(p, jobId, stage.parents.head.id)
+          locs = getPreferredLocs(p, jobId, stage)
         tasks += new ShuffleMapTask(stage.id, stage.rdd, stage.shuffleDep.get, p, locs, taskScheduler.getJobContext(jobId))
       }
     } else {
@@ -760,7 +762,7 @@ class DAGScheduler(
         if (stage.parents.size == 0 || !getCacheLocs(stage.rdd)(partition).isEmpty) {
           locs = getPreferredLocs(stage.rdd, partition)
         } else
-          locs = getPreferredLocs(stage.rdd.partitions(partition).index, jobId, stage.id)
+          locs = getPreferredLocs(stage.rdd.partitions(partition).index, jobId, stage)
         tasks += new ResultTask(stage.id, stage.rdd, job.func, partition, locs, id)
       }
     }
@@ -1152,13 +1154,14 @@ class DAGScheduler(
   }
 
   private[spark]
-  def getPreferredLocs(partition: Int, jobId: Int, stageId: Int): Seq[TaskLocation] = synchronized {
+  def getPreferredLocs(partition: Int, jobId: Int, stage: Stage): Seq[TaskLocation] = synchronized {
+    val stageId = stage.parents.head.id
     val jobContext = taskScheduler.getJobContext(jobId)
-    val stageContext = jobContext.stageContexts(stageId)
+    val stageContext = jobContext.stageOutputMapping(stageId)
 //    logInfo("schedule result task, stage context:" + stageContext)
     val host = stageContext(partition)
     logInfo("get preferred location, stage id:"+ stageId +", split id:" + partition + ", host:" + host)
-    Seq(TaskLocation(host))
+    Seq(TaskLocation(host._1))
   }
 
   def stop() {

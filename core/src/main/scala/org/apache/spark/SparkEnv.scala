@@ -220,7 +220,7 @@ object SparkEnv extends Logging {
     val cacheManager = new CacheManager(blockManager)
 
     val shuffleFetcher = instantiateClass[ShuffleFetcher](
-      "spark.shuffle.fetcher", "org.apache.spark.LocalStoreShuffleFetcher")
+      "spark.shuffle.fetcher", "org.apache.spark.BlockStoreShuffleFetcher")
 
     val httpFileServer = new HttpFileServer(securityManager)
     httpFileServer.initialize()

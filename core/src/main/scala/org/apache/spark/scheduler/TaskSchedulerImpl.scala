@@ -201,12 +201,12 @@ private[spark] class TaskSchedulerImpl(
       .format(manager.taskSet.id, manager.parent.name))
   }
 
-  override def addStageContext(jobId: Int, stage: Stage) {
-    backend.addStageContext(jobId, stage)
+  override def addOutputMapping(jobId: Int, stage: Stage) {
+    backend.addOutputMapping(jobId, stage)
   }
 
-  override def getJobContext(jobId: Int): SparkJobContext = {
-    backend.getJobContext(jobId)
+  override def getJobContext(jobId: Int): SparkOutputContext = {
+    backend.getOutputContext(jobId)
   }
 
   /**

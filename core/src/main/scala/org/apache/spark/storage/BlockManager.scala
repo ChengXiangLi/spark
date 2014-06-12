@@ -794,6 +794,29 @@ private[spark] class BlockManager(
     }
   }
 
+  def copyShuffleBlock(blockId: BlockId, targetExecutorId: String): Future[Option[Message]] = {
+    if (this.executorId.equalsIgnoreCase(targetExecutorId)) {
+      logDebug("target executorId[" + targetExecutorId + "] is same as local executorId[" +
+        this.executorId + "], do not need copy here.")
+    }
+    getLocalBytes(blockId) match {
+      case Some(data) =>
+        val blockManagerId: BlockManagerId = master.getConnectionId(targetExecutorId)
+        val start = System.nanoTime
+        data.rewind()
+        logDebug("Try to replicate BlockId " + blockId + " once; The size of the data is "
+          + data.limit() + " Bytes. To node: " + blockManagerId)
+        val message: Future[Option[Message]] = BlockManagerWorker.asyncPutBlock(PutBlock(blockId, data, StorageLevel.DISK_ONLY),
+          new ConnectionManagerId(blockManagerId.host, blockManagerId.port))
+        logDebug("Replicated BlockId " + blockId + " once used " +
+          (System.nanoTime - start) / 1e6 + " s; The size of the data is " +
+          data.limit() + " bytes.")
+        message
+      case None =>
+        throw new SparkException("Failed to find local block with blockId:" + blockId)
+    }
+  }
+
   /**
    * Read a block consisting of a single object.
    */
