@@ -55,6 +55,7 @@ private[spark] class BlockManager(
   val shuffleBlockManager = new ShuffleBlockManager(this)
   val diskBlockManager = new DiskBlockManager(shuffleBlockManager,
     conf.get("spark.local.dir",  System.getProperty("java.io.tmpdir")))
+  val shuffleBlockStorageLevel = StorageLevel.fromString(conf.get("spark.shuffle.block.storage.level", "DISK_ONLY"))
 
   private val blockInfo = new TimeStampedHashMap[BlockId, BlockInfo]
 
@@ -334,7 +335,7 @@ private[spark] class BlockManager(
   }
 
   def getLocalFromMemory(blockId: BlockId, serializer: Serializer): Option[Iterator[Any]] = {
-    memoryStore.getValues(blockId).orElse(None)
+    memoryStore.getValues(blockId, serializer).orElse(None)
   }
 
   /**
@@ -811,7 +812,7 @@ private[spark] class BlockManager(
         logDebug("Try to replicate BlockId " + blockId + " once; The size of the data is "
           + data.limit() + " Bytes. To node: " + blockManagerId)
         val message: Future[Option[Message]] = BlockManagerWorker.asyncPutBlock(PutBlock(blockId,
-          data, StorageLevel.DISK_ONLY),
+          data, shuffleBlockStorageLevel),
           new ConnectionManagerId(blockManagerId.host, blockManagerId.port))
         logDebug("Replicated BlockId " + blockId + " once used " +
           (System.nanoTime - start) / 1e6 + " s; The size of the data is " +

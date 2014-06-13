@@ -23,6 +23,7 @@ import java.util.LinkedHashMap
 import scala.collection.mutable.ArrayBuffer
 
 import org.apache.spark.util.{SizeEstimator, Utils}
+import org.apache.spark.serializer.Serializer
 
 /**
  * Stores blocks in memory, either as ArrayBuffers of deserialized Java objects or as
@@ -116,6 +117,20 @@ private class MemoryStore(blockManager: BlockManager, maxMemory: Long)
     } else {
       val buffer = entry.value.asInstanceOf[ByteBuffer].duplicate() // Doesn't actually copy data
       Some(blockManager.dataDeserialize(blockId, buffer))
+    }
+  }
+
+  def getValues(blockId: BlockId, serializer: Serializer): Option[Iterator[Any]] = {
+    val entry = entries.synchronized {
+      entries.get(blockId)
+    }
+    if (entry == null) {
+      None
+    } else if (entry.deserialized) {
+      Some(entry.value.asInstanceOf[ArrayBuffer[Any]].iterator)
+    } else {
+      val buffer = entry.value.asInstanceOf[ByteBuffer].duplicate() // Doesn't actually copy data
+      Some(blockManager.dataDeserialize(blockId, buffer, serializer))
     }
   }
 
