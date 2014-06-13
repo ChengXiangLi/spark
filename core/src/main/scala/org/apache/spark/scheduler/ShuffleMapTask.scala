@@ -32,6 +32,7 @@ import org.apache.spark.serializer.Serializer
 import org.apache.spark.storage._
 import java.util.concurrent.atomic.AtomicInteger
 import java.nio.ByteBuffer
+import org.apache.spark.util.Utils
 
 
 private[spark] object ShuffleMapTask {
@@ -157,22 +158,38 @@ private[spark] class ShuffleMapTask(
     val stageContext: HashMap[Int, (String, String)] = jobContext.stageOutputMapping(actualStageId)
     val blockManager = SparkEnv.get.blockManager
     val start = System.currentTimeMillis();
+    var targetSize: Int = shuffleBlocks.size;
     shuffleBlocks.map {
       case (index, blockId) => {
-        val targetExecutorId = stageContext(index)._2
-        val future = blockManager.copyShuffleBlock(blockId, targetExecutorId)
-        future.onSuccess {
-          case Some(message) =>
-            val currentFinished = finishedCount.incrementAndGet()
-            if (currentFinished == shuffleBlocks.size) {
-              execBackend.statusUpdate(context.attemptId, TaskState.PUSHED, data)
-              logInfo("Task[" + context.attemptId + "] outputs have been pushed to reduce side. totally cost:" +
-                (System.currentTimeMillis() - start) + "ms.")
-            }
-          case None =>
-            throw new SparkException("Failed to copy shuffle block:" + blockId + " to target:" + targetExecutorId)
+        val targetHost = stageContext(index)._1
+        if (isLocalHost(targetHost)) {
+          targetSize = targetSize-1
+        } else {
+          val targetExecutorId = stageContext(index)._2
+          val future = blockManager.copyShuffleBlock(blockId, targetExecutorId)
+          future.onSuccess {
+            case Some(message) =>
+              val currentFinished = finishedCount.incrementAndGet()
+              if (currentFinished == targetSize) {
+                execBackend.statusUpdate(context.attemptId, TaskState.PUSHED, data)
+                logInfo("Task[" + context.attemptId + "] outputs have been pushed to reduce side with " +
+                  targetSize + "/" + shuffleBlocks.size + " blocks been push remotely. totally cost:" +
+                  (System.currentTimeMillis() - start) + "ms.")
+              }
+            case None =>
+              throw new SparkException("Failed to copy shuffle block:" + blockId + " to target:" + targetExecutorId)
+          }
         }
       }
+    }
+  }
+
+  private def isLocalHost(host: String): Boolean = {
+    if (host.equalsIgnoreCase("localhost") || host.equalsIgnoreCase("127.0.0.1") ||
+      Utils.localHostName().equalsIgnoreCase(host)) {
+      true
+    } else {
+      false
     }
   }
 
