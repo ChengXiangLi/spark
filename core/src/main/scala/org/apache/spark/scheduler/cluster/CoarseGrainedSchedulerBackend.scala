@@ -94,6 +94,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
       case StatusUpdate(executorId, taskId, state, data) =>
         scheduler.statusUpdate(taskId, state, data.value)
         if (TaskState.isFinished(state) && !TaskState.PUSHED.equals(state)) {
+          System.out.print("received task status, task:%d state:%s.\n".format(taskId, state))
           if (executorActor.contains(executorId)) {
             freeCores(executorId) += scheduler.CPUS_PER_TASK
             makeOffers(executorId)
@@ -164,6 +165,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
         else {
           freeCores(task.executorId) -= scheduler.CPUS_PER_TASK
           executorActor(task.executorId) ! LaunchTask(new SerializableBuffer(serializedTask))
+          System.out.println("start to launch task:" + task.taskId + " on executor:" + task.executorId)
         }
       }
     }
