@@ -20,8 +20,19 @@ private[spark] class LocalStoreShuffleFetcher extends ShuffleFetcher with Loggin
     val dir = new File(dirPath)
     logInfo("try to read file from " + dirPath)
     val files = dir.listFiles()
-    logInfo("local store dir for shuffleId:" + shuffleId + " reduceId:" + reduceId + "dir path:" + dir +
-      " found files:" + files.map(f=> f.getCanonicalPath))
+    if (files == null || files.isEmpty) {
+      return new Iterator[Any] {
+        def hasNext: Boolean = {
+          false
+        }
+
+        def next(): Any = {
+          None
+        }
+      }.asInstanceOf[Iterator[T]]
+    }
+//    logInfo("local store dir for shuffleId:" + shuffleId + " reduceId:" + reduceId + "dir path:" + dir +
+//      " found files:" + files.map(f=> f.getCanonicalPath))
     val combineIter = new Iterator[Any]{
       val iters: Seq[Iterator[Any]] = files.map(file => {
         val stream = compressionCodec.compressedInputStream(new FileInputStream(file))

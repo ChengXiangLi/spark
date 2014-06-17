@@ -104,8 +104,6 @@ private[spark] class Executor(
   // Start worker thread pool
   val threadPool = Utils.newDaemonCachedThreadPool("Executor task launch worker")
 
-  val pushShufflePool = Utils.newDaemonCachedThreadPool("Shuffle block push worker")
-
   // Maintains the list of running tasks.
   private val runningTasks = new ConcurrentHashMap[Long, TaskRunner]
 
@@ -231,11 +229,7 @@ private[spark] class Executor(
         execBackend.statusUpdate(taskId, TaskState.FINISHED, serializedResult)
         logInfo("Finished task ID " + taskId)
         if (task.isInstanceOf[ShuffleMapTask]) {
-          pushShufflePool.execute(new Runnable {
-            def run(): Unit = {
-              task.pushData(execBackend, serializedResult)
-            }
-          })
+          task.asInstanceOf[ShuffleMapTask].pushData(execBackend, serializedResult)
         } else {
           execBackend.statusUpdate(taskId, TaskState.PUSHED, serializedResult)
         }

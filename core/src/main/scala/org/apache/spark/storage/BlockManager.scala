@@ -809,12 +809,12 @@ private[spark] class BlockManager(
         val blockManagerId: BlockManagerId = master.getConnectionId(targetExecutorId)
         val start = System.nanoTime
         data.rewind()
-        logDebug("Try to replicate BlockId " + blockId + " once; The size of the data is "
+        logInfo("Try to replicate BlockId " + blockId + " once; The size of the data is "
           + data.limit() + " Bytes. To node: " + blockManagerId)
         val message: Future[Option[Message]] = BlockManagerWorker.asyncPutBlock(PutBlock(blockId,
           data, shuffleBlockStorageLevel),
           new ConnectionManagerId(blockManagerId.host, blockManagerId.port))
-        logDebug("Replicated BlockId " + blockId + " once used " +
+        logInfo("Replicated BlockId " + blockId + " once used " +
           (System.nanoTime - start) / 1e6 + " s; The size of the data is " +
           data.limit() + " bytes.")
         message
