@@ -3,6 +3,7 @@ package org.apache.spark
 import org.apache.spark.serializer.Serializer
 import java.io.{FileInputStream, File}
 import org.apache.spark.io.CompressionCodec
+import com.google.common.collect.Lists
 
 
 private[spark] class LocalStoreShuffleFetcher extends ShuffleFetcher with Logging {
@@ -21,6 +22,8 @@ private[spark] class LocalStoreShuffleFetcher extends ShuffleFetcher with Loggin
     logInfo("try to read file from " + dirPath)
     val files = dir.listFiles()
     if (files == null || files.isEmpty) {
+      logInfo("local store dir for shuffleId:" + shuffleId + " reduceId:" + reduceId + "dir path:" + dir +
+        " found no file")
       return new Iterator[Any] {
         def hasNext: Boolean = {
           false
@@ -31,8 +34,8 @@ private[spark] class LocalStoreShuffleFetcher extends ShuffleFetcher with Loggin
         }
       }.asInstanceOf[Iterator[T]]
     }
-//    logInfo("local store dir for shuffleId:" + shuffleId + " reduceId:" + reduceId + "dir path:" + dir +
-//      " found files:" + files.map(f=> f.getCanonicalPath))
+    logInfo("local store dir for shuffleId:" + shuffleId + " reduceId:" + reduceId + "dir path:" + dir +
+      " found files:" + files.map(f=> f.getCanonicalPath))
     val combineIter = new Iterator[Any]{
       val iters: Seq[Iterator[Any]] = files.map(file => {
         val stream = compressionCodec.compressedInputStream(new FileInputStream(file))
@@ -40,17 +43,20 @@ private[spark] class LocalStoreShuffleFetcher extends ShuffleFetcher with Loggin
       })
       var index = 0
       def hasNext: Boolean = {
-        if (iters(index).hasNext) {
-          true
-        } else {
-          while (index < iters.size - 1) {
-            index += 1
-            if (iters(index).hasNext) {
-              true
-            }
+        hasNext(index)
+      }
+
+      private def hasNext(in: Int): Boolean = {
+        this.index = in
+        var result: Boolean = false
+        if (in < iters.size) {
+          if (iters(index).hasNext) {
+            result = true
+          } else {
+            result = hasNext(in + 1)
           }
-          false
         }
+        result
       }
 
       def next(): Any = {

@@ -158,18 +158,14 @@ private[spark] class ShuffleMapTask(
     val stageContext: HashMap[Int, (String, String)] = jobContext.stageOutputMapping(actualStageId)
     val blockManager = SparkEnv.get.blockManager
     val start = System.currentTimeMillis();
-    var targetSize: Int = shuffleBlocks.size;
+    val targetSize: Int = shuffleBlocks.size;
     if (shuffleBlocks.isEmpty) {
       execBackend.statusUpdate(context.attemptId, TaskState.PUSHED, data)
       logInfo("task:" + context.attemptId + " shuffleBlocks is empty, directly update pushed state.")
-      return
-    }
-    shuffleBlocks.map {
-      case (index, blockId) => {
-        val targetHost = stageContext(index)._1
-        if (isLocalHost(targetHost)) {
-          targetSize = targetSize-1
-        } else {
+    } else {
+      shuffleBlocks.map {
+        case (index, blockId) => {
+          val targetHost = stageContext(index)._1
           val targetExecutorId = stageContext(index)._2
           logInfo("try to transfer task[" + context.attemptId + " block id:" + blockId + " to host:" + targetHost)
           val future = blockManager.copyShuffleBlock(blockId, targetExecutorId)
@@ -189,16 +185,6 @@ private[spark] class ShuffleMapTask(
         }
       }
     }
-  }
-
-  private def isLocalHost(host: String): Boolean = {
-//    if (host.equalsIgnoreCase("localhost") || host.equalsIgnoreCase("127.0.0.1") ||
-//      Utils.localHostName().equalsIgnoreCase(host)) {
-//      true
-//    } else {
-//      false
-//    }
-    false
   }
 
   def getReduceIdByShuffleFileName(fileName: String): String = {
