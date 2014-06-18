@@ -156,11 +156,12 @@ object BlockFetcherIterator {
       // at most maxBytesInFlight in order to limit the amount of data in flight.
       val remoteRequests = new ArrayBuffer[FetchRequest]
       for ((address, blockInfos) <- blocksByAddress) {
-        if (address == blockManagerId) {
+        if (true) {
           numLocal = blockInfos.size
           // Filter out zero-sized blocks
-          localBlocksToFetch ++= blockInfos.filter(_._2 != 0).map(_._1)
-          _numBlocksToFetch += localBlocksToFetch.size
+          val map = blockInfos.filter(_._2 != 0).map(_._1)
+          localBlocksToFetch ++= map
+          _numBlocksToFetch += map.size
         } else {
           numRemote += blockInfos.size
           val iterator = blockInfos.iterator
@@ -201,14 +202,23 @@ object BlockFetcherIterator {
       // these all at once because they will just memory-map some files, so they won't consume
       // any memory that might exceed our maxBytesInFlight
       for (id <- localBlocksToFetch) {
-        getLocalFromDisk(id, serializer) match {
+        getLocalFromMemory(id, serializer) match {
           case Some(iter) => {
             // Pass 0 as size since it's not in flight
             results.put(new FetchResult(id, 0, () => iter))
-            logDebug("Got local block " + id)
+            logInfo("Got local block " + id + " from memory.")
           }
           case None => {
-            throw new BlockException(id, "Could not get block " + id + " from local machine")
+            getLocalFromDisk(id, serializer) match {
+              case Some(iter) => {
+                // Pass 0 as size since it's not in flight
+                results.put(new FetchResult(id, 0, () => iter))
+                logInfo("Got local block " + id + " from disk.")
+              }
+              case None => {
+                throw new BlockException(id, "Could not get block " + id + " from local machine")
+              }
+            }
           }
         }
       }

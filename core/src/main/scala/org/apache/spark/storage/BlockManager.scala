@@ -55,6 +55,7 @@ private[spark] class BlockManager(
   val shuffleBlockManager = new ShuffleBlockManager(this)
   val diskBlockManager = new DiskBlockManager(shuffleBlockManager,
     conf.get("spark.local.dir",  System.getProperty("java.io.tmpdir")))
+  val shuffleBlockStorageLevel = StorageLevel.fromString(conf.get("spark.shuffle.block.storage.level", "DISK_ONLY"))
 
   private val blockInfo = new TimeStampedHashMap[BlockId, BlockInfo]
 
@@ -331,6 +332,10 @@ private[spark] class BlockManager(
   def getLocalFromDisk(blockId: BlockId, serializer: Serializer): Option[Iterator[Any]] = {
     diskStore.getValues(blockId, serializer).orElse(
       sys.error("Block " + blockId + " not found on disk, though it should be"))
+  }
+
+  def getLocalFromMemory(blockId: BlockId, serializer: Serializer): Option[Iterator[Any]] = {
+    memoryStore.getValues(blockId, serializer).orElse(None)
   }
 
   /**
@@ -791,6 +796,30 @@ private[spark] class BlockManager(
       logDebug("Replicated BlockId " + blockId + " once used " +
         (System.nanoTime - start) / 1e6 + " s; The size of the data is " +
         data.limit() + " bytes.")
+    }
+  }
+
+  def copyShuffleBlock(blockId: BlockId, targetExecutorId: String): Future[Option[Message]] = {
+    if (this.executorId.equalsIgnoreCase(targetExecutorId)) {
+      logDebug("target executorId[" + targetExecutorId + "] is same as local executorId[" +
+        this.executorId + "], do not need copy here.")
+    }
+    getLocalBytes(blockId) match {
+      case Some(data) =>
+        val blockManagerId: BlockManagerId = master.getConnectionId(targetExecutorId)
+        val start = System.nanoTime
+        data.rewind()
+        logInfo("Try to replicate BlockId " + blockId + " once; The size of the data is "
+          + data.limit() + " Bytes. To node: " + blockManagerId)
+        val message: Future[Option[Message]] = BlockManagerWorker.asyncPutBlock(PutBlock(blockId,
+          data, shuffleBlockStorageLevel),
+          new ConnectionManagerId(blockManagerId.host, blockManagerId.port))
+        logInfo("Replicated BlockId " + blockId + " once used " +
+          (System.nanoTime - start) / 1e6 + " s; The size of the data is " +
+          data.limit() + " bytes.")
+        message
+      case None =>
+        throw new SparkException("Failed to find local block with blockId:" + blockId)
     }
   }
 

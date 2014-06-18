@@ -89,6 +89,9 @@ class BlockManagerMasterActor(val isLocal: Boolean, conf: SparkConf, listenerBus
     case GetPeers(blockManagerId, size) =>
       sender ! getPeers(blockManagerId, size)
 
+    case GetConnectionId(executorId) =>
+      sender ! getConnectionId(executorId)
+
     case GetMemoryStatus =>
       sender ! memoryStatus
 
@@ -410,6 +413,10 @@ class BlockManagerMasterActor(val isLocal: Boolean, conf: SparkConf, listenerBus
     // Note that this logic will select the same node multiple times if there aren't enough peers
     Array.tabulate[BlockManagerId](size) { i => peers((selfIndex + i + 1) % peers.length) }.toSeq
   }
+
+  private def getConnectionId(executorId: String): BlockManagerId = {
+    return blockManagerIdByExecutor(executorId)
+  }
 }
 
 @DeveloperApi
@@ -469,18 +476,18 @@ private[spark] class BlockManagerInfo(
       if (storageLevel.useMemory) {
         _blocks.put(blockId, BlockStatus(storageLevel, memSize, 0, 0))
         _remainingMem -= memSize
-        logInfo("Added %s in memory on %s (size: %s, free: %s)".format(
+        logDebug("Added %s in memory on %s (size: %s, free: %s)".format(
           blockId, blockManagerId.hostPort, Utils.bytesToString(memSize),
           Utils.bytesToString(_remainingMem)))
       }
       if (storageLevel.useDisk) {
         _blocks.put(blockId, BlockStatus(storageLevel, 0, diskSize, 0))
-        logInfo("Added %s on disk on %s (size: %s)".format(
+        logDebug("Added %s on disk on %s (size: %s)".format(
           blockId, blockManagerId.hostPort, Utils.bytesToString(diskSize)))
       }
       if (storageLevel.useOffHeap) {
         _blocks.put(blockId, BlockStatus(storageLevel, 0, 0, tachyonSize))
-        logInfo("Added %s on tachyon on %s (size: %s)".format(
+        logDebug("Added %s on tachyon on %s (size: %s)".format(
           blockId, blockManagerId.hostPort, Utils.bytesToString(tachyonSize)))
       }
     } else if (_blocks.containsKey(blockId)) {
@@ -489,16 +496,16 @@ private[spark] class BlockManagerInfo(
       _blocks.remove(blockId)
       if (blockStatus.storageLevel.useMemory) {
         _remainingMem += blockStatus.memSize
-        logInfo("Removed %s on %s in memory (size: %s, free: %s)".format(
+        logDebug("Removed %s on %s in memory (size: %s, free: %s)".format(
           blockId, blockManagerId.hostPort, Utils.bytesToString(blockStatus.memSize),
           Utils.bytesToString(_remainingMem)))
       }
       if (blockStatus.storageLevel.useDisk) {
-        logInfo("Removed %s on %s on disk (size: %s)".format(
+        logDebug("Removed %s on %s on disk (size: %s)".format(
           blockId, blockManagerId.hostPort, Utils.bytesToString(blockStatus.diskSize)))
       }
       if (blockStatus.storageLevel.useOffHeap) {
-        logInfo("Removed %s on %s on tachyon (size: %s)".format(
+        logDebug("Removed %s on %s on tachyon (size: %s)".format(
           blockId, blockManagerId.hostPort, Utils.bytesToString(blockStatus.tachyonSize)))
       }
     }

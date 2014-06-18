@@ -19,14 +19,16 @@ package org.apache.spark.scheduler.cluster
 
 import java.util.concurrent.atomic.AtomicInteger
 
-import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
+import scala.collection.mutable.{ListBuffer, ArrayBuffer, HashMap, HashSet}
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
 import akka.actor._
 import akka.pattern.ask
-import akka.remote.{DisassociatedEvent, RemotingLifecycleEvent}
+import akka.remote.RemotingLifecycleEvent
 
+import org.apache.spark.scheduler.SparkOutputContext
+import akka.remote.DisassociatedEvent
 import org.apache.spark.{SparkEnv, Logging, SparkException, TaskState}
 import org.apache.spark.scheduler.{SchedulerBackend, SlaveLost, TaskDescription, TaskSchedulerImpl, WorkerOffer}
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
@@ -47,9 +49,10 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
   // Use an atomic variable to track total number of cores in the cluster for simplicity and speed
   var totalCoreCount = new AtomicInteger(0)
   val conf = scheduler.sc.conf
-  private val timeout = AkkaUtils.askTimeout(conf)
+  val jobToJobContext = new HashMap[Int, SparkOutputContext]
+  var executorIds = new ListBuffer[(String, String)]()
   private val akkaFrameSize = AkkaUtils.maxFrameSizeBytes(conf)
-
+  private val timeout = AkkaUtils.askTimeout(conf)
   class DriverActor(sparkProperties: Seq[(String, String)]) extends Actor {
     private val executorActor = new HashMap[String, ActorRef]
     private val executorAddress = new HashMap[String, Address]
@@ -77,7 +80,9 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
           logInfo("Registered executor: " + sender + " with ID " + executorId)
           sender ! RegisteredExecutor(sparkProperties)
           executorActor(executorId) = sender
-          executorHost(executorId) = Utils.parseHostPort(hostPort)._1
+          val host = Utils.parseHostPort(hostPort)._1
+          executorHost(executorId) = host
+          executorIds.append((host, executorId))
           totalCores(executorId) = cores
           freeCores(executorId) = cores
           executorAddress(executorId) = sender.path.address
@@ -88,7 +93,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
 
       case StatusUpdate(executorId, taskId, state, data) =>
         scheduler.statusUpdate(taskId, state, data.value)
-        if (TaskState.isFinished(state)) {
+        if (TaskState.isFinished(state) && !TaskState.PUSHED.equals(state)) {
           if (executorActor.contains(executorId)) {
             freeCores(executorId) += scheduler.CPUS_PER_TASK
             makeOffers(executorId)
@@ -123,7 +128,6 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
       case DisassociatedEvent(_, address, _) =>
         addressToExecutorId.get(address).foreach(removeExecutor(_,
           "remote Akka client disassociated"))
-
     }
 
     // Make fake resource offers on all executors
@@ -243,6 +247,25 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
       case e: Exception =>
         throw new SparkException("Error notifying standalone scheduler's driver actor", e)
     }
+  }
+
+  override def addOutputMapping(jobId: Int, stage: org.apache.spark.scheduler.Stage) {
+    val jobContext = jobToJobContext.getOrElseUpdate(jobId, new SparkOutputContext(jobId))
+    addStageOutputMapping(jobContext, stage)
+  }
+
+  def addStageOutputMapping(jobContext: SparkOutputContext, stage: org.apache.spark.scheduler.Stage) {
+    val stageContext = new HashMap[Int, (String, String)]
+    stage.rdd.partitions.foreach(partition => {
+      stageContext(partition.index) = executorIds(partition.index % executorIds.size)
+    })
+    stage.parents.foreach(parent => {
+      jobContext.stageOutputMapping.put(parent.id, stageContext)
+    })
+  }
+
+  override def getOutputContext(jobId: Int): SparkOutputContext = {
+    jobToJobContext(jobId)
   }
 }
 

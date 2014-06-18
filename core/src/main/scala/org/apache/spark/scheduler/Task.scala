@@ -23,7 +23,7 @@ import java.nio.ByteBuffer
 import scala.collection.mutable.HashMap
 
 import org.apache.spark.TaskContext
-import org.apache.spark.executor.TaskMetrics
+import org.apache.spark.executor.{ExecutorBackend, TaskMetrics}
 import org.apache.spark.serializer.SerializerInstance
 import org.apache.spark.util.ByteBufferInputStream
 

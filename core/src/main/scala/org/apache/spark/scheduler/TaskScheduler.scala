@@ -54,4 +54,8 @@ private[spark] trait TaskScheduler {
 
   // Get the default level of parallelism to use in the cluster, as a hint for sizing jobs.
   def defaultParallelism(): Int
+
+  def addOutputMapping(jobId: Int, stage: Stage) {}
+
+  def getJobContext(jobId: Int): SparkOutputContext = {null}
 }

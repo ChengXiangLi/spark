@@ -37,27 +37,28 @@ import org.apache.spark.metrics.MetricsSystem
 import org.apache.spark.util.{AkkaUtils, Utils}
 
 /**
-  * @param masterUrls Each url should look like spark://host:port.
-  */
+ * @param masterUrls Each url should look like spark://host:port.
+ */
 private[spark] class Worker(
-    host: String,
-    port: Int,
-    webUiPort: Int,
-    cores: Int,
-    memory: Int,
-    masterUrls: Array[String],
-    actorSystemName: String,
-    actorName: String,
-    workDirPath: String = null,
-    val conf: SparkConf,
-    val securityMgr: SecurityManager)
+                             host: String,
+                             port: Int,
+                             webUiPort: Int,
+                             cores: Int,
+                             memory: Int,
+                             masterUrls: Array[String],
+                             actorSystemName: String,
+                             actorName: String,
+                             workDirPath: String = null,
+                             val conf: SparkConf,
+                             val securityMgr: SecurityManager)
   extends Actor with Logging {
+
   import context.dispatcher
 
   Utils.checkHost(host, "Expected hostname")
-  assert (port > 0)
+  assert(port > 0)
 
-  def createDateFormat = new SimpleDateFormat("yyyyMMddHHmmss")  // For worker and executor IDs
+  def createDateFormat = new SimpleDateFormat("yyyyMMddHHmmss") // For worker and executor IDs
 
   // Send a heartbeat every (heartbeat timeout) / 4 milliseconds
   val HEARTBEAT_MILLIS = conf.getLong("spark.worker.timeout", 60) * 1000 / 4
@@ -76,7 +77,7 @@ private[spark] class Worker(
   var master: ActorSelection = null
   var masterAddress: Address = null
   var activeMasterUrl: String = ""
-  var activeMasterWebUiUrl : String = ""
+  var activeMasterWebUiUrl: String = ""
   val akkaUrl = "akka.tcp://%s@%s:%s/user/%s".format(actorSystemName, host, port, actorName)
   @volatile var registered = false
   @volatile var connected = false
@@ -103,6 +104,7 @@ private[spark] class Worker(
   var registrationRetryTimer: Option[Cancellable] = None
 
   def coresFree: Int = cores - coresUsed
+
   def memoryFree: Int = memory - memoryUsed
 
   def createWorkDir() {
@@ -111,11 +113,11 @@ private[spark] class Worker(
       // This sporadically fails - not sure why ... !workDir.exists() && !workDir.mkdirs()
       // So attempting to create and then check if directory was created or not.
       workDir.mkdirs()
-      if ( !workDir.exists() || !workDir.isDirectory) {
+      if (!workDir.exists() || !workDir.isDirectory) {
         logError("Failed to create work directory " + workDir)
         System.exit(1)
       }
-      assert (workDir.isDirectory)
+      assert(workDir.isDirectory)
     } catch {
       case e: Exception =>
         logError("Failed to create work directory " + workDir, e)
@@ -194,7 +196,9 @@ private[spark] class Worker(
 
     case SendHeartbeat =>
       masterLock.synchronized {
-        if (connected) { master ! Heartbeat(workerId) }
+        if (connected) {
+          master ! Heartbeat(workerId)
+        }
       }
 
     case WorkDirCleanup =>
@@ -374,13 +378,13 @@ private[spark] object Worker {
   }
 
   def startSystemAndActor(
-      host: String,
-      port: Int,
-      webUiPort: Int,
-      cores: Int,
-      memory: Int,
-      masterUrls: Array[String],
-      workDir: String, workerNumber: Option[Int] = None): (ActorSystem, Int) = {
+                           host: String,
+                           port: Int,
+                           webUiPort: Int,
+                           cores: Int,
+                           memory: Int,
+                           masterUrls: Array[String],
+                           workDir: String, workerNumber: Option[Int] = None): (ActorSystem, Int) = {
 
     // The LocalSparkCluster runs multiple local sparkWorkerX actor systems
     val conf = new SparkConf
@@ -390,7 +394,7 @@ private[spark] object Worker {
     val (actorSystem, boundPort) = AkkaUtils.createActorSystem(systemName, host, port,
       conf = conf, securityManager = securityMgr)
     actorSystem.actorOf(Props(classOf[Worker], host, boundPort, webUiPort, cores, memory,
-      masterUrls, systemName, actorName,  workDir, conf, securityMgr), name = actorName)
+      masterUrls, systemName, actorName, workDir, conf, securityMgr), name = actorName)
     (actorSystem, boundPort)
   }
 

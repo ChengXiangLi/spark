@@ -99,6 +99,15 @@ class BlockManagerMaster(var driverActor: ActorRef, conf: SparkConf) extends Log
     result
   }
 
+  def getConnectionId(executorId: String): BlockManagerId = {
+    val result = askDriverWithReply[BlockManagerId](GetConnectionId(executorId))
+    if (result == null) {
+      throw new SparkException(
+        "Error getting connection id with executor id:" + executorId)
+    }
+    result
+  }
+
   /**
    * Remove a block from the slaves that have it. This can only be used to remove
    * blocks that the driver knows about.

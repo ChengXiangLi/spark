@@ -17,7 +17,7 @@
 
 package org.apache.spark.scheduler
 
-import java.io.{NotSerializableException, PrintWriter, StringWriter}
+import java.io.NotSerializableException
 import java.util.Properties
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -708,6 +708,9 @@ class DAGScheduler(
   /** Submits stage, but first recursively submits any missing parents. */
   private def submitStage(stage: Stage) {
     val jobId = activeJobForStage(stage)
+    if (!stage.parents.isEmpty) {
+      addOutputMapping(jobId.get, stage)
+    }
     if (jobId.isDefined) {
       logDebug("submitStage(" + stage + ")")
       if (!waitingStages(stage) && !runningStages(stage) && !failedStages(stage)) {
@@ -729,6 +732,10 @@ class DAGScheduler(
     }
   }
 
+  private def addOutputMapping(jobId: Int, stage: Stage) {
+    taskScheduler.addOutputMapping(jobId, stage)
+  }
+
 
   /** Called when stage's parents are available and we can now do its task. */
   private def submitMissingTasks(stage: Stage, jobId: Int) {
@@ -739,15 +746,23 @@ class DAGScheduler(
     var tasks = ArrayBuffer[Task[_]]()
     if (stage.isShuffleMap) {
       for (p <- 0 until stage.numPartitions if stage.outputLocs(p) == Nil) {
-        val locs = getPreferredLocs(stage.rdd, p)
-        tasks += new ShuffleMapTask(stage.id, stage.rdd, stage.shuffleDep.get, p, locs)
+        var locs:Seq[TaskLocation] = null
+        if (stage.parents.size == 0 || !getCacheLocs(stage.rdd)(p).isEmpty) {
+          locs = getPreferredLocs(stage.rdd, p)
+        } else
+          locs = getPreferredLocs(p, jobId, stage)
+        tasks += new ShuffleMapTask(stage.id, stage.rdd, stage.shuffleDep.get, p, locs, taskScheduler.getJobContext(jobId))
       }
     } else {
       // This is a final stage; figure out its job's missing partitions
       val job = resultStageToJob(stage)
       for (id <- 0 until job.numPartitions if !job.finished(id)) {
         val partition = job.partitions(id)
-        val locs = getPreferredLocs(stage.rdd, partition)
+        var locs:Seq[TaskLocation] = null
+        if (stage.parents.size == 0 || !getCacheLocs(stage.rdd)(partition).isEmpty) {
+          locs = getPreferredLocs(stage.rdd, partition)
+        } else
+          locs = getPreferredLocs(stage.rdd.partitions(partition).index, jobId, stage)
         tasks += new ResultTask(stage.id, stage.rdd, job.func, partition, locs, id)
       }
     }
@@ -1138,6 +1153,17 @@ class DAGScheduler(
     Nil
   }
 
+  private[spark]
+  def getPreferredLocs(partition: Int, jobId: Int, stage: Stage): Seq[TaskLocation] = synchronized {
+    val stageId = stage.parents.head.id
+    val jobContext = taskScheduler.getJobContext(jobId)
+    val stageContext = jobContext.stageOutputMapping(stageId)
+//    logInfo("schedule result task, stage context:" + stageContext)
+    val host = stageContext(partition)
+    logInfo("get preferred location, stage id:"+ stageId +", split id:" + partition + ", host:" + host)
+    Seq(TaskLocation(host._1))
+  }
+
   def stop() {
     logInfo("Stopping DAGScheduler")
     dagSchedulerActorSupervisor ! PoisonPill
@@ -1153,6 +1179,7 @@ private[scheduler] class DAGSchedulerActorSupervisor(dagScheduler: DAGScheduler)
       case x: Exception =>
         logError("eventProcesserActor failed due to the error %s; shutting down SparkContext"
           .format(x.getMessage))
+        x.printStackTrace()
         dagScheduler.doCancelAllJobs()
         dagScheduler.sc.stop()
         Stop

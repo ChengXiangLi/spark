@@ -22,6 +22,9 @@ import java.nio.ByteBuffer
 import org.apache.spark.Logging
 import org.apache.spark.network._
 import org.apache.spark.util.Utils
+import scala.concurrent.Future
+import java.io.{FileOutputStream, File}
+import java.util.concurrent.LinkedBlockingQueue
 
 /**
  * A network interface for BlockManager. Each slave should have one
@@ -30,6 +33,10 @@ import org.apache.spark.util.Utils
  * TODO: Use event model.
  */
 private[spark] class BlockManagerWorker(val blockManager: BlockManager) extends Logging {
+
+  private val rootDir = "/home/spark/local";
+  private val  fileNames = new LinkedBlockingQueue[String](20)
+  (0 until 20).foreach(index => fileNames.add(Integer.toString(index)))
 
   blockManager.connectionManager.onReceiveMessage(onBlockMessageReceive)
 
@@ -63,6 +70,12 @@ private[spark] class BlockManagerWorker(val blockManager: BlockManager) extends 
         putBlock(pB.id, pB.data, pB.level)
         None
       }
+//      case BlockMessage.TYPE_SHF_BLOCK => {
+//        val pB = TransferBlock(blockMessage.getId, blockMessage.getData, blockMessage.getLevel)
+//        logDebug("Received [" + pB + "]")
+//        putTransferBlock(pB.id, pB.data, pB.level)
+//        None
+//      }
       case BlockMessage.TYPE_GET_BLOCK => {
         val gB = new GetBlock(blockMessage.getId)
         logDebug("Received [" + gB + "]")
@@ -76,12 +89,45 @@ private[spark] class BlockManagerWorker(val blockManager: BlockManager) extends 
     }
   }
 
+//  private def putBlock(id: BlockId, bytes: ByteBuffer, level: StorageLevel) {
+//    val startTimeMs = System.currentTimeMillis()
+//    logDebug("PutBlock " + id + " started from " + startTimeMs + " with data: " + bytes)
+//    blockManager.putBytes(id, bytes, level)
+//    logDebug("PutBlock " + id + " used " + Utils.getUsedTimeMs(startTimeMs)
+//        + " with data size: " + bytes.limit)
+//  }
+
   private def putBlock(id: BlockId, bytes: ByteBuffer, level: StorageLevel) {
-    val startTimeMs = System.currentTimeMillis()
-    logDebug("PutBlock " + id + " started from " + startTimeMs + " with data: " + bytes)
-    blockManager.putBytes(id, bytes, level)
-    logDebug("PutBlock " + id + " used " + Utils.getUsedTimeMs(startTimeMs)
-        + " with data size: " + bytes.limit)
+    val blockId = id.name
+    val pathSeparator = System.getProperties().getProperty("path.deparator", "/");
+    val parent = rootDir + pathSeparator + getShuffleIdByShuffleFilename(blockId) +
+      pathSeparator + getReduceIdByShuffleFileName(blockId)
+
+    val fileName = fileNames.take()
+
+    val file = new File(parent, fileName)
+    if (!file.getParentFile().exists()) {
+      file.getParentFile().mkdirs()
+    }
+    val fos = new FileOutputStream(file, true);
+    val fileChannel = fos.getChannel()
+    var writeSize = 0
+    bytes.rewind()
+    while(bytes.hasRemaining) {
+      writeSize += fileChannel.write(bytes)
+    }
+    bytes.clear()
+    fileChannel.close()
+    logInfo("finished write block:" + blockId + " files into local:" + file.getCanonicalPath + " total write size:" + writeSize)
+    fileNames.put(fileName)
+  }
+
+  private def getReduceIdByShuffleFileName(fileName: String): String = {
+    fileName.split("_")(3)
+  }
+
+  private def getShuffleIdByShuffleFilename(fileName: String): String = {
+    fileName.split("_")(1)
   }
 
   private def getBlock(id: BlockId): ByteBuffer = {
@@ -112,6 +158,16 @@ private[spark] object BlockManagerWorker extends Logging {
     val resultMessage = connectionManager.sendMessageReliablySync(
         toConnManagerId, blockMessageArray.toBufferMessage)
     resultMessage.isDefined
+  }
+
+  def asyncPutBlock(msg: PutBlock, toConnManagerId: ConnectionManagerId): Future[Option[Message]] = {
+    val blockManager = blockManagerWorker.blockManager
+    val connectionManager = blockManager.connectionManager
+    val blockMessage = BlockMessage.fromPutBlock(msg)
+    val blockMessageArray = new BlockMessageArray(blockMessage)
+    val resultMessage = connectionManager.sendMessageReliably(
+      toConnManagerId, blockMessageArray.toBufferMessage)
+    resultMessage
   }
 
   def syncGetBlock(msg: GetBlock, toConnManagerId: ConnectionManagerId): ByteBuffer = {

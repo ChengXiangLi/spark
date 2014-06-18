@@ -23,7 +23,7 @@ import io.netty.channel.SimpleChannelInboundHandler;
 
 import org.apache.spark.storage.BlockId;
 
-abstract class FileClientHandler extends SimpleChannelInboundHandler<ByteBuf> {
+public abstract class FileClientHandler extends SimpleChannelInboundHandler<ByteBuf> {
 
   private FileHeader currentHeader = null;
 

@@ -82,6 +82,9 @@ object SynthBenchmark {
 
     val sc = new SparkContext(conf)
 
+    System.out.printf("current thread start to sleep 10s.\n")
+    Thread.sleep(10000)
+
     // Create the graph
     println(s"Creating graph...")
     val unpartitionedGraph = GraphGenerators.logNormalGraph(sc, numVertices,

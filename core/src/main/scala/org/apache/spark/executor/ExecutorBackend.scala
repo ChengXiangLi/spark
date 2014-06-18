@@ -20,6 +20,7 @@ package org.apache.spark.executor
 import java.nio.ByteBuffer
 
 import org.apache.spark.TaskState.TaskState
+import scala.collection.mutable
 
 /**
  * A pluggable interface used by the Executor to send updates to the cluster scheduler.

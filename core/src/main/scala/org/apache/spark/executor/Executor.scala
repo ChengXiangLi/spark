@@ -113,6 +113,8 @@ private[spark] class Executor(
     threadPool.execute(tr)
   }
 
+
+
   def killTask(taskId: Long, interruptThread: Boolean) {
     val tr = runningTasks.get(taskId)
     if (tr != null) {
@@ -226,6 +228,11 @@ private[spark] class Executor(
 
         execBackend.statusUpdate(taskId, TaskState.FINISHED, serializedResult)
         logInfo("Finished task ID " + taskId)
+        if (task.isInstanceOf[ShuffleMapTask]) {
+          task.asInstanceOf[ShuffleMapTask].pushData(execBackend, serializedResult)
+        } else {
+          execBackend.statusUpdate(taskId, TaskState.PUSHED, serializedResult)
+        }
       } catch {
         case ffe: FetchFailedException => {
           val reason = ffe.toTaskEndReason

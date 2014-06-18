@@ -30,4 +30,8 @@ private[spark] trait SchedulerBackend {
 
   def killTask(taskId: Long, executorId: String, interruptThread: Boolean): Unit =
     throw new UnsupportedOperationException
+
+  def addOutputMapping(jobId: Int, stage: Stage) {}
+
+  def getOutputContext(jobId: Int): SparkOutputContext = {null}
 }

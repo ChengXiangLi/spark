@@ -21,9 +21,9 @@ import org.apache.mesos.Protos.{TaskState => MesosTaskState}
 
 private[spark] object TaskState extends Enumeration {
 
-  val LAUNCHING, RUNNING, FINISHED, FAILED, KILLED, LOST = Value
+  val LAUNCHING, RUNNING, FINISHED, FAILED, KILLED, LOST, PUSHED = Value
 
-  val FINISHED_STATES = Set(FINISHED, FAILED, KILLED, LOST)
+  val FINISHED_STATES = Set(FINISHED, FAILED, KILLED, LOST, PUSHED)
 
   type TaskState = Value
 

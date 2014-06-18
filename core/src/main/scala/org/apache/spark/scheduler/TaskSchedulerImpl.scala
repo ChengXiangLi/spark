@@ -201,6 +201,14 @@ private[spark] class TaskSchedulerImpl(
       .format(manager.taskSet.id, manager.parent.name))
   }
 
+  override def addOutputMapping(jobId: Int, stage: Stage) {
+    backend.addOutputMapping(jobId, stage)
+  }
+
+  override def getJobContext(jobId: Int): SparkOutputContext = {
+    backend.getOutputContext(jobId)
+  }
+
   /**
    * Called by cluster manager to offer resources on slaves. We respond by asking our active task
    * sets for tasks in order of priority. We fill each node with tasks in a round-robin manner so
@@ -275,12 +283,12 @@ private[spark] class TaskSchedulerImpl(
         }
         taskIdToTaskSetId.get(tid) match {
           case Some(taskSetId) =>
-            if (TaskState.isFinished(state)) {
+            if (TaskState.isFinished(state) && !state.equals(TaskState.FINISHED)) {
               taskIdToTaskSetId.remove(tid)
               taskIdToExecutorId.remove(tid)
             }
             activeTaskSets.get(taskSetId).foreach { taskSet =>
-              if (state == TaskState.FINISHED) {
+              if (state == TaskState.PUSHED) {
                 taskSet.removeRunningTask(tid)
                 taskResultGetter.enqueueSuccessfulTask(taskSet, tid, serializedData)
               } else if (Set(TaskState.FAILED, TaskState.KILLED, TaskState.LOST).contains(state)) {

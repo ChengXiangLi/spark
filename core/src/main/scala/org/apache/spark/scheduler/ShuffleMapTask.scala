@@ -22,13 +22,18 @@ import scala.language.existentials
 import java.io._
 import java.util.zip.{GZIPInputStream, GZIPOutputStream}
 
-import scala.collection.mutable.HashMap
+import scala.collection.mutable.{ListBuffer, HashMap}
+import scala.concurrent.ExecutionContext.Implicits.global
 
 import org.apache.spark._
-import org.apache.spark.executor.ShuffleWriteMetrics
+import org.apache.spark.executor.{ExecutorBackend, ShuffleWriteMetrics}
 import org.apache.spark.rdd.{RDD, RDDCheckpointData}
 import org.apache.spark.serializer.Serializer
 import org.apache.spark.storage._
+import java.util.concurrent.atomic.AtomicInteger
+import java.nio.ByteBuffer
+import org.apache.spark.util.Utils
+
 
 private[spark] object ShuffleMapTask {
 
@@ -37,7 +42,7 @@ private[spark] object ShuffleMapTask {
   // expensive on the master node if it needs to launch thousands of tasks.
   private val serializedInfoCache = new HashMap[Int, Array[Byte]]
 
-  def serializeInfo(stageId: Int, rdd: RDD[_], dep: ShuffleDependency[_,_]): Array[Byte] = {
+  def serializeInfo(stageId: Int, rdd: RDD[_], dep: ShuffleDependency[_, _]): Array[Byte] = {
     synchronized {
       val old = serializedInfoCache.get(stageId).orNull
       if (old != null) {
@@ -56,12 +61,12 @@ private[spark] object ShuffleMapTask {
     }
   }
 
-  def deserializeInfo(stageId: Int, bytes: Array[Byte]): (RDD[_], ShuffleDependency[_,_]) = {
+  def deserializeInfo(stageId: Int, bytes: Array[Byte]): (RDD[_], ShuffleDependency[_, _]) = {
     val in = new GZIPInputStream(new ByteArrayInputStream(bytes))
     val ser = SparkEnv.get.closureSerializer.newInstance()
     val objIn = ser.deserializeStream(in)
     val rdd = objIn.readObject().asInstanceOf[RDD[_]]
-    val dep = objIn.readObject().asInstanceOf[ShuffleDependency[_,_]]
+    val dep = objIn.readObject().asInstanceOf[ShuffleDependency[_, _]]
     (rdd, dep)
   }
 
@@ -97,16 +102,21 @@ private[spark] object ShuffleMapTask {
  * @param locs preferred task execution locations for locality scheduling
  */
 private[spark] class ShuffleMapTask(
-    stageId: Int,
-    var rdd: RDD[_],
-    var dep: ShuffleDependency[_,_],
-    _partitionId: Int,
-    @transient private var locs: Seq[TaskLocation])
+                                     stageId: Int,
+                                     var rdd: RDD[_],
+                                     var dep: ShuffleDependency[_, _],
+                                     _partitionId: Int,
+                                     @transient private var locs: Seq[TaskLocation],
+                                     var jobContext: SparkOutputContext)
   extends Task[MapStatus](stageId, _partitionId)
   with Externalizable
   with Logging {
 
-  protected def this() = this(0, null, null, 0, null)
+  val shuffleBlocks = new ListBuffer[(Int, BlockId)]()
+
+  var actualStageId: Int = _
+
+  protected def this() = this(0, null, null, 0, null, null)
 
   @transient private val preferredLocs: Seq[TaskLocation] = {
     if (locs == null) Nil else locs.toSet.toSeq
@@ -124,11 +134,13 @@ private[spark] class ShuffleMapTask(
       out.writeInt(partitionId)
       out.writeLong(epoch)
       out.writeObject(split)
+      out.writeObject(jobContext)
     }
   }
 
   override def readExternal(in: ObjectInput) {
     val stageId = in.readInt()
+    actualStageId = stageId
     val numBytes = in.readInt()
     val bytes = new Array[Byte](numBytes)
     in.readFully(bytes)
@@ -138,6 +150,49 @@ private[spark] class ShuffleMapTask(
     partitionId = in.readInt()
     epoch = in.readLong()
     split = in.readObject().asInstanceOf[Partition]
+    jobContext = in.readObject().asInstanceOf[SparkOutputContext]
+  }
+
+  def pushData(execBackend: ExecutorBackend, data: ByteBuffer) {
+    val finishedCount: AtomicInteger = new AtomicInteger(0);
+    val stageContext: HashMap[Int, (String, String)] = jobContext.stageOutputMapping(actualStageId)
+    val blockManager = SparkEnv.get.blockManager
+    val start = System.currentTimeMillis();
+    val targetSize: Int = shuffleBlocks.size;
+    if (shuffleBlocks.isEmpty) {
+      execBackend.statusUpdate(context.attemptId, TaskState.PUSHED, data)
+      logInfo("task:" + context.attemptId + " shuffleBlocks is empty, directly update pushed state.")
+    } else {
+      shuffleBlocks.map {
+        case (index, blockId) => {
+          val targetHost = stageContext(index)._1
+          val targetExecutorId = stageContext(index)._2
+          logInfo("try to transfer task[" + context.attemptId + " block id:" + blockId + " to host:" + targetHost)
+          val future = blockManager.copyShuffleBlock(blockId, targetExecutorId)
+          future.onSuccess {
+            case Some(message) =>
+              val currentFinished = finishedCount.incrementAndGet()
+              logInfo("task[" + context.attemptId + "] outputs " + currentFinished + "/" + targetSize + " blocks has been pushed to remote.")
+              if (currentFinished == targetSize) {
+                execBackend.statusUpdate(context.attemptId, TaskState.PUSHED, data)
+                logInfo("Task[" + context.attemptId + "] outputs have been pushed to reduce side with " +
+                  targetSize + "/" + shuffleBlocks.size + " blocks been push remotely. totally cost:" +
+                  (System.currentTimeMillis() - start) + "ms.")
+              }
+            case None =>
+              throw new SparkException("Failed to copy shuffle block:" + blockId + " to target:" + targetExecutorId)
+          }
+        }
+      }
+    }
+  }
+
+  def getReduceIdByShuffleFileName(fileName: String): String = {
+    fileName.split("_")(3)
+  }
+
+  def getShuffleIdByShuffleFilename(fileName: String): String = {
+    fileName.split("_")(1)
   }
 
   override def runTask(context: TaskContext): MapStatus = {
@@ -164,13 +219,23 @@ private[spark] class ShuffleMapTask(
       // Commit the writes. Get the size of each bucket block (total block size).
       var totalBytes = 0L
       var totalTime = 0L
-      val compressedSizes: Array[Byte] = shuffle.writers.map { writer: BlockObjectWriter =>
-        writer.commit()
-        writer.close()
-        val size = writer.fileSegment().length
-        totalBytes += size
-        totalTime += writer.timeWriting()
-        MapOutputTracker.compressSize(size)
+      val compressedSizes: Array[Byte] = shuffle.writers.map {
+        writer: BlockObjectWriter =>
+          writer.commit()
+          writer.close()
+          val size = writer.fileSegment().length
+          totalBytes += size
+          totalTime += writer.timeWriting()
+          MapOutputTracker.compressSize(size)
+      }
+
+      shuffle.writers.zipWithIndex.foreach {
+        case (writer, index) => {
+          val objWriter = writer.asInstanceOf[DiskBlockObjectWriter]
+         if (objWriter.file.exists()) {
+            shuffleBlocks.append((index, objWriter.blockId))
+          }
+        }
       }
 
       // Update shuffle metrics.
@@ -181,16 +246,17 @@ private[spark] class ShuffleMapTask(
 
       success = true
       new MapStatus(blockManager.blockManagerId, compressedSizes)
-    } catch { case e: Exception =>
-      // If there is an exception from running the task, revert the partial writes
-      // and throw the exception upstream to Spark.
-      if (shuffle != null && shuffle.writers != null) {
-        for (writer <- shuffle.writers) {
-          writer.revertPartialWrites()
-          writer.close()
+    } catch {
+      case e: Exception =>
+        // If there is an exception from running the task, revert the partial writes
+        // and throw the exception upstream to Spark.
+        if (shuffle != null && shuffle.writers != null) {
+          for (writer <- shuffle.writers) {
+            writer.revertPartialWrites()
+            writer.close()
+          }
         }
-      }
-      throw e
+        throw e
     } finally {
       // Release the writers back to the shuffle block manager.
       if (shuffle != null && shuffle.writers != null) {
