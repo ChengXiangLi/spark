@@ -24,13 +24,13 @@ import org.apache.spark.annotation.DeveloperApi
  * A result of a job in the DAGScheduler.
  */
 @DeveloperApi
-sealed trait JobResult
+sealed trait StageResult
 
 @DeveloperApi
-case object JobSucceeded extends JobResult
+case object StageSucceeded extends StageResult
 
 @DeveloperApi
-private[spark] case class JobFailed(exception: Exception) extends JobResult
+private[spark] case class StageFailed(exception: Exception) extends StageResult
 
 @DeveloperApi
-private[spark] case class JobKilled(reason: String) extends JobResult
+private[spark] case class StageKilled(reason: String) extends StageResult

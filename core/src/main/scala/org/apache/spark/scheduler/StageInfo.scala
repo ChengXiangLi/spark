@@ -39,12 +39,12 @@ class StageInfo(
   /** Time when all tasks in the stage completed or when the stage was cancelled. */
   var completionTime: Option[Long] = None
   /** If the stage failed, the reason why. */
-  var failureReason: Option[String] = None
+  var result: StageResult = _
   /** Terminal values of accumulables updated during this stage. */
   val accumulables = HashMap[Long, AccumulableInfo]()
 
-  def stageFailed(reason: String) {
-    failureReason = Some(reason)
+  def stageEnd(stageResult: StageResult) {
+    result = stageResult
     completionTime = Some(System.currentTimeMillis)
   }
 }

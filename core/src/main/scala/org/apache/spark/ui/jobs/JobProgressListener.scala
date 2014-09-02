@@ -76,12 +76,13 @@ class JobProgressListener(conf: SparkConf) extends SparkListener with Logging {
       hashMap.remove(stage.stageId)
     }
     activeStages.remove(stage.stageId)
-    if (stage.failureReason.isEmpty) {
-      completedStages += stage
-      trimIfNecessary(completedStages)
-    } else {
-      failedStages += stage
-      trimIfNecessary(failedStages)
+    stage.result match {
+      case StageSucceeded =>
+        completedStages += stage
+        trimIfNecessary(completedStages)
+      case _ =>
+        failedStages += stage
+        trimIfNecessary(failedStages)
     }
   }
 

@@ -22,7 +22,7 @@ import scala.xml.Text
 
 import java.util.Date
 
-import org.apache.spark.scheduler.StageInfo
+import org.apache.spark.scheduler.{StageKilled, StageFailed, StageSucceeded, StageInfo}
 import org.apache.spark.ui.{ToolTips, UIUtils}
 import org.apache.spark.util.Utils
 
@@ -194,8 +194,17 @@ private[ui] class FailedStageTable(
   override protected def columns: Seq[Node] = super.columns ++ <th>Failure Reason</th>
 
   override protected def stageRow(s: StageInfo): Seq[Node] = {
+    val reasonInfo = s.result match {
+      case StageSucceeded =>
+        ""
+      case StageFailed(exception) => {
+        exception.getMessage
+      }
+      case StageKilled(reason) =>
+        reason
+    }
     val basicColumns = super.stageRow(s)
-    val failureReason = <td valign="middle"><pre>{s.failureReason.getOrElse("")}</pre></td>
+    val failureReason = <td valign="middle"><pre>{reasonInfo}</pre></td>
     basicColumns ++ failureReason
   }
 }

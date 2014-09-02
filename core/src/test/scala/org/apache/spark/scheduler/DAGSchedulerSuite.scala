@@ -101,10 +101,11 @@ class DAGSchedulerSuite extends TestKit(ActorSystem("DAGSchedulerSuite")) with F
     val failedStages = new ArrayBuffer[Int]()
     override def onStageCompleted(stageCompleted: SparkListenerStageCompleted) {
       val stageInfo = stageCompleted.stageInfo
-      if (stageInfo.failureReason.isEmpty) {
-        successfulStages += stageInfo.stageId
-      } else {
-        failedStages += stageInfo.stageId
+      stageInfo.result match {
+        case StageSucceeded =>
+          successfulStages += stageInfo.stageId
+        case _ =>
+          failedStages += stageInfo.stageId
       }
     }
   }

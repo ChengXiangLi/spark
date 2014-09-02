@@ -78,7 +78,9 @@ class JsonProtocolSuite extends FunSuite {
 
   test("Dependent Classes") {
     testRDDInfo(makeRddInfo(2, 3, 4, 5L, 6L))
-    testStageInfo(makeStageInfo(10, 20, 30, 40L, 50L))
+    testStageInfo(makeStageInfo(10, 20, 30, 40L, 50L, StageSucceeded))
+    testStageInfo(makeStageInfo(10, 20, 30, 40L, 50L, StageKilled("killed by user")))
+    testStageInfo(makeStageInfo(10, 20, 30, 40L, 50L, StageFailed(new SparkException("failed"))))
     testTaskInfo(makeTaskInfo(999L, 888, 55, 777L, false))
     testTaskMetrics(makeTaskMetrics(33333L, 44444L, 55555L, 66666L, 7, 8, hasHadoopInput = false))
     testBlockManagerId(BlockManagerId("Hong", "Kong", 500))
@@ -396,6 +398,7 @@ class JsonProtocolSuite extends FunSuite {
 
   private def assertJsonStringEquals(json1: String, json2: String) {
     val formatJsonString = (json: String) => json.replaceAll("[\\s|]", "")
+
     assert(formatJsonString(json1) === formatJsonString(json2),
       s"input ${formatJsonString(json1)} got ${formatJsonString(json2)}")
   }
@@ -483,13 +486,25 @@ class JsonProtocolSuite extends FunSuite {
     r
   }
 
-  private def makeStageInfo(a: Int, b: Int, c: Int, d: Long, e: Long) = {
+  private def makeStageInfo(
+      a: Int,
+      b: Int,
+      c: Int,
+      d: Long,
+      e: Long,
+      result: StageResult): StageInfo = {
+
     val rddInfos = (0 until a % 5).map { i => makeRddInfo(a + i, b + i, c + i, d + i, e + i) }
     val stageInfo = new StageInfo(a, 0, "greetings", b, rddInfos, "details")
     val (acc1, acc2) = (makeAccumulableInfo(1), makeAccumulableInfo(2))
     stageInfo.accumulables(acc1.id) = acc1
     stageInfo.accumulables(acc2.id) = acc2
+    stageInfo.result = result
     stageInfo
+  }
+
+  private def makeStageInfo(a: Int, b: Int, c: Int, d: Long, e: Long): StageInfo = {
+    makeStageInfo(a, b, c, d, e, StageSucceeded)
   }
 
   private def makeTaskInfo(a: Long, b: Int, c: Int, d: Long, speculative: Boolean) = {
@@ -567,6 +582,9 @@ class JsonProtocolSuite extends FunSuite {
       |    "Number of Tasks": 200,
       |    "RDD Info": [],
       |    "Details": "details",
+      |    "Stage Result": {
+      |      "Result": "StageSucceeded"
+      |    },
       |    "Accumulables": [
       |      {
       |        "ID": 2,
@@ -619,6 +637,9 @@ class JsonProtocolSuite extends FunSuite {
       |      }
       |    ],
       |    "Details": "details",
+      |    "Stage Result": {
+      |      "Result": "StageSucceeded"
+      |    },
       |    "Accumulables": [
       |      {
       |        "ID": 2,

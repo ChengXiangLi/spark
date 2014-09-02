@@ -513,6 +513,9 @@ class DAGScheduler(
       case JobFailed(exception: Exception) =>
         logInfo("Failed to run " + callSite.shortForm)
         throw exception
+      case JobKilled(reason) =>
+        logInfo("Job got killed " + callSite.shortForm)
+        throw new SparkException(reason)
     }
   }
 
@@ -698,7 +701,7 @@ class DAGScheduler(
       // is in the process of getting stopped.
       val stageFailedMessage = "Stage cancelled because SparkContext was shut down"
       runningStages.foreach { stage =>
-        stage.latestInfo.stageFailed(stageFailedMessage)
+        stage.latestInfo.stageEnd(StageFailed(new SparkException(stageFailedMessage)))
         listenerBus.post(SparkListenerStageCompleted(stage.latestInfo))
       }
       listenerBus.post(SparkListenerJobEnd(job.jobId, JobFailed(error)))
@@ -921,10 +924,10 @@ class DAGScheduler(
         case _ => "Unknown"
       }
       if (errorMessage.isEmpty) {
+        stage.latestInfo.stageEnd(StageSucceeded)
         logInfo("%s (%s) finished in %s s".format(stage, stage.name, serviceTime))
-        stage.latestInfo.completionTime = Some(clock.getTime())
       } else {
-        stage.latestInfo.stageFailed(errorMessage.get)
+        stage.latestInfo.stageEnd(StageFailed(new SparkException(errorMessage.get)))
         logInfo("%s (%s) failed in %s s".format(stage, stage.name, serviceTime))
       }
       listenerBus.post(SparkListenerStageCompleted(stage.latestInfo))
@@ -1153,7 +1156,7 @@ class DAGScheduler(
       logDebug("Trying to cancel unregistered job " + jobId)
     } else {
       failJobAndIndependentStages(
-        jobIdToActiveJob(jobId), "Job %d cancelled %s".format(jobId, reason))
+        jobIdToActiveJob(jobId), JobKilled("Job %d cancelled %s".format(jobId, reason)))
     }
     submitWaitingStages()
   }
@@ -1171,7 +1174,8 @@ class DAGScheduler(
       activeJobs.filter(job => stageDependsOn(job.finalStage, failedStage)).toSeq
     failedStage.latestInfo.completionTime = Some(clock.getTime())
     for (job <- dependentJobs) {
-      failJobAndIndependentStages(job, s"Job aborted due to stage failure: $reason")
+      failJobAndIndependentStages(job,
+        JobFailed(new SparkException(s"Job aborted due to stage failure: $reason")))
     }
     if (dependentJobs.isEmpty) {
       logInfo("Ignoring failure of " + failedStage + " because all jobs depending on it are done")
@@ -1181,9 +1185,17 @@ class DAGScheduler(
   /**
    * Fails a job and all stages that are only used by that job, and cleans up relevant state.
    */
-  private def failJobAndIndependentStages(job: ActiveJob, failureReason: String) {
-    val error = new SparkException(failureReason)
+  private def failJobAndIndependentStages(job: ActiveJob, jobResult: JobResult) {
     var ableToCancelStages = true
+
+    val error = jobResult match {
+      case JobKilled(reason) =>
+        new SparkException(reason)
+      case JobFailed(exception) =>
+        exception
+      case JobSucceeded =>
+        throw new SparkException("Should not handle JobSuccess here.")
+    }
 
     val shouldInterruptThread =
       if (job.properties == null) false
@@ -1209,7 +1221,15 @@ class DAGScheduler(
           if (runningStages.contains(stage)) {
             try { // cancelTasks will fail if a SchedulerBackend does not implement killTask
               taskScheduler.cancelTasks(stageId, shouldInterruptThread)
-              stage.latestInfo.stageFailed(failureReason)
+              val stageResult = jobResult match {
+                case JobKilled(reason) =>
+                  StageKilled(reason)
+                case JobFailed(exception) =>
+                  StageFailed(exception)
+                case JobSucceeded =>
+                  throw new SparkException("Should not handle JobSuccess here.")
+              }
+              stage.latestInfo.stageEnd(stageResult)
               listenerBus.post(SparkListenerStageCompleted(stage.latestInfo))
             } catch {
               case e: UnsupportedOperationException =>
@@ -1224,7 +1244,7 @@ class DAGScheduler(
     if (ableToCancelStages) {
       job.listener.jobFailed(error)
       cleanupStateForJobAndIndependentStages(job)
-      listenerBus.post(SparkListenerJobEnd(job.jobId, JobFailed(error)))
+      listenerBus.post(SparkListenerJobEnd(job.jobId, jobResult))
     }
   }
 

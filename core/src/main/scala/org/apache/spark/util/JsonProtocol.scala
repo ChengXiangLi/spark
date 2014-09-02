@@ -25,11 +25,8 @@ import scala.collection.Map
 import org.json4s.DefaultFormats
 import org.json4s.JsonDSL._
 import org.json4s.JsonAST._
-import org.json4s.jackson.JsonMethods._
 
-
-import org.apache.spark.executor.{DataReadMethod, InputMetrics, ShuffleReadMetrics,
-  ShuffleWriteMetrics, TaskMetrics}
+import org.apache.spark.executor._
 import org.apache.spark.scheduler._
 import org.apache.spark.storage._
 import org.apache.spark._
@@ -187,7 +184,7 @@ private[spark] object JsonProtocol {
     val rddInfo = JArray(stageInfo.rddInfos.map(rddInfoToJson).toList)
     val submissionTime = stageInfo.submissionTime.map(JInt(_)).getOrElse(JNothing)
     val completionTime = stageInfo.completionTime.map(JInt(_)).getOrElse(JNothing)
-    val failureReason = stageInfo.failureReason.map(JString(_)).getOrElse(JNothing)
+    val result = stageResultToJson(stageInfo.result)
     ("Stage ID" -> stageInfo.stageId) ~
     ("Stage Attempt ID" -> stageInfo.attemptId) ~
     ("Stage Name" -> stageInfo.name) ~
@@ -196,7 +193,7 @@ private[spark] object JsonProtocol {
     ("Details" -> stageInfo.details) ~
     ("Submission Time" -> submissionTime) ~
     ("Completion Time" -> completionTime) ~
-    ("Failure Reason" -> failureReason) ~
+    ("Stage Result" -> result) ~
     ("Accumulables" -> JArray(
         stageInfo.accumulables.values.map(accumulableInfoToJson).toList))
   }
@@ -304,6 +301,20 @@ private[spark] object JsonProtocol {
       case JobSucceeded => Utils.emptyJson
       case jobFailed: JobFailed =>
         JObject("Exception" -> exceptionToJson(jobFailed.exception))
+      case JobKilled(reason) =>
+        Utils.emptyJson ~ ("Reason" -> reason)
+    }
+    ("Result" -> result) ~ json
+  }
+
+  def stageResultToJson(stageResult: StageResult): JValue = {
+    val result = Utils.getFormattedClassName(stageResult)
+    val json = stageResult match {
+      case StageSucceeded => Utils.emptyJson
+      case StageFailed(exception) =>
+        JObject("Exception" -> exceptionToJson(exception))
+      case StageKilled(reason) =>
+        Utils.emptyJson ~ ("Reason" -> reason)
     }
     ("Result" -> result) ~ json
   }
@@ -503,7 +514,7 @@ private[spark] object JsonProtocol {
     val details = (json \ "Details").extractOpt[String].getOrElse("")
     val submissionTime = Utils.jsonOption(json \ "Submission Time").map(_.extract[Long])
     val completionTime = Utils.jsonOption(json \ "Completion Time").map(_.extract[Long])
-    val failureReason = Utils.jsonOption(json \ "Failure Reason").map(_.extract[String])
+    val result = stageResultFromJson(json \ "Stage Result")
     val accumulatedValues = (json \ "Accumulables").extractOpt[List[JValue]] match {
       case Some(values) => values.map(accumulableInfoFromJson(_))
       case None => Seq[AccumulableInfo]()
@@ -512,7 +523,7 @@ private[spark] object JsonProtocol {
     val stageInfo = new StageInfo(stageId, attemptId, stageName, numTasks, rddInfos, details)
     stageInfo.submissionTime = submissionTime
     stageInfo.completionTime = completionTime
-    stageInfo.failureReason = failureReason
+    stageInfo.result = result
     for (accInfo <- accumulatedValues) {
       stageInfo.accumulables(accInfo.id) = accInfo
     }
@@ -649,12 +660,32 @@ private[spark] object JsonProtocol {
   def jobResultFromJson(json: JValue): JobResult = {
     val jobSucceeded = Utils.getFormattedClassName(JobSucceeded)
     val jobFailed = Utils.getFormattedClassName(JobFailed)
+    val jobKilled = Utils.getFormattedClassName(JobKilled)
 
     (json \ "Result").extract[String] match {
       case `jobSucceeded` => JobSucceeded
       case `jobFailed` =>
         val exception = exceptionFromJson(json \ "Exception")
         new JobFailed(exception)
+      case `jobKilled` =>
+        val reason = (json \ "Reason").extract[String]
+        new JobKilled(reason)
+    }
+  }
+
+  def stageResultFromJson(json: JValue): StageResult = {
+    val stageSucceeded = Utils.getFormattedClassName(StageSucceeded)
+    val stageFailed = Utils.getFormattedClassName(StageFailed)
+    val stageKilled = Utils.getFormattedClassName(StageKilled)
+
+    (json \ "Result").extract[String] match {
+      case `stageSucceeded` => StageSucceeded
+      case `stageFailed` =>
+        val exception = exceptionFromJson(json \ "Exception")
+        new StageFailed(exception)
+      case `stageKilled` =>
+        val reason = (json \ "Reason").extract[String]
+        new StageKilled(reason)
     }
   }
 
